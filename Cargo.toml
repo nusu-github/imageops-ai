@@ -1,0 +1,15 @@
+[package]
+name = "imageops-ai"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+strict = ["num-bigint", "num-rational"]
+
+[dependencies]
+image = { version = "0.25", default-features = false }
+num-bigint = { version = "0.4.6", optional = true }
+num-rational = { version = "0.4.2", optional = true }
+num-traits = "0.2"
+thiserror = "2.0"
