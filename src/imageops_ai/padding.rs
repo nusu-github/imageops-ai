@@ -1,5 +1,6 @@
 use crate::error::PaddingError;
-use image::{imageops, ImageBuffer, Pixel};
+use crate::Image;
+use image::{imageops, Pixel};
 use num_traits::AsPrimitive;
 
 /// パディング位置を指定する列挙型
@@ -89,7 +90,7 @@ pub trait Padding<P: Pixel> {
         pad_size: (u32, u32),
         position: Position,
         color: P,
-    ) -> Result<(ImageBuffer<P, Vec<P::Subpixel>>, (u32, u32)), PaddingError>;
+    ) -> Result<(Image<P>, (u32, u32)), PaddingError>;
 
     /// 正方形になるようにパディングを追加する
     ///
@@ -100,10 +101,7 @@ pub trait Padding<P: Pixel> {
     /// # 戻り値
     ///
     /// パディング済み画像と元画像の配置位置のタプル
-    fn add_padding_square(
-        self,
-        color: P,
-    ) -> Result<(ImageBuffer<P, Vec<P::Subpixel>>, (u32, u32)), PaddingError>;
+    fn add_padding_square(self, color: P) -> Result<(Image<P>, (u32, u32)), PaddingError>;
 
     /// パディング位置を計算する
     fn calculate_padding_position(
@@ -116,7 +114,7 @@ pub trait Padding<P: Pixel> {
     fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError>;
 }
 
-impl<P: Pixel> Padding<P> for ImageBuffer<P, Vec<P::Subpixel>> {
+impl<P: Pixel> Padding<P> for Image<P> {
     fn add_padding(
         self,
         pad_size: (u32, u32),

@@ -20,8 +20,8 @@ where
         let max_value = f32::from(S::DEFAULT_MAX_VALUE);
         ImageBuffer::from_fn(self.width(), self.height(), |x, y| unsafe {
             let LumaA([luminance, alpha]) = *self.get_pixel(x, y);
-            let luminance_f32 = f32::from(luminance);
             let alpha_normalized = f32::from(alpha) / max_value;
+            let luminance_f32 = f32::from(luminance);
             Luma([S::from(luminance_f32 * alpha_normalized).unwrap_unchecked()])
         })
     }
@@ -61,7 +61,8 @@ where
 {
     fn estimate_foreground<SM>(self, mask: &Image<Luma<SM>>, r: u32) -> Image<Rgb<S>>
     where
-        SM: Primitive + 'static;
+        SM: Primitive + 'static,
+        f32: From<SM>;
 }
 
 impl<S> ForegroundEstimator<S> for Image<Rgb<S>>
@@ -69,12 +70,14 @@ where
     Rgb<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
 {
     fn estimate_foreground<SM>(self, mask: &Image<Luma<SM>>, r: u32) -> Self
     where
         SM: Primitive + 'static,
+        f32: From<SM>,
     {
-        let max = S::DEFAULT_MAX_VALUE.to_f32().unwrap();
+        let max = f32::from(S::DEFAULT_MAX_VALUE);
         let image = unsafe {
             ImageBuffer::from_raw(
                 self.width(),
@@ -85,7 +88,7 @@ where
             )
             .unwrap_unchecked()
         };
-        let mask_max = SM::DEFAULT_MAX_VALUE.to_f32().unwrap();
+        let mask_max = f32::from(SM::DEFAULT_MAX_VALUE);
         let alpha = unsafe {
             ImageBuffer::from_raw(
                 mask.width(),

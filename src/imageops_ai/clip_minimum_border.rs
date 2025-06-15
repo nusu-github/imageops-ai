@@ -12,6 +12,7 @@ impl<P, S> ClipMinimumBorder for Image<P>
 where
     P: Pixel<Subpixel = S> + 'static,
     S: Primitive + 'static,
+    f32: From<S>,
 {
     fn clip_minimum_border(mut self, iterations: usize, threshold: u8) -> Self {
         for i in 0..iterations {
@@ -39,6 +40,7 @@ trait ImageProcessing<P: Pixel> {
 impl<P: Pixel> ImageProcessing<P> for Image<P>
 where
     <P as Pixel>::Subpixel: 'static,
+    f32: From<P::Subpixel>,
 {
     fn extract_corners(&self) -> [Luma<P::Subpixel>; 4] {
         let (width, height) = self.dimensions();
@@ -54,7 +56,7 @@ where
     }
 
     fn find_content_bounds(&self, background: &Luma<P::Subpixel>, threshold: u8) -> [u32; 4] {
-        let max = P::Subpixel::DEFAULT_MAX_VALUE.to_f32().unwrap();
+        let max = f32::from(P::Subpixel::DEFAULT_MAX_VALUE);
         let (width, height) = self.dimensions();
         let mut bounds = [width, height, 0, 0]; // [x1, y1, x2, y2]
 
@@ -79,12 +81,10 @@ where
         background: &Luma<P::Subpixel>,
         max: f32,
     ) -> u8 {
-        let pixel_value = merge_alpha(pixel.to_luma_alpha())[0]
-            .to_f32()
-            .unwrap()
+        let pixel_value = f32::from(merge_alpha(pixel.to_luma_alpha())[0])
             .div(max)
             .mul(255.0);
-        let background_value = background[0].to_f32().unwrap().div(max).mul(255.0);
+        let background_value = f32::from(background[0]).div(max).mul(255.0);
         pixel_value
             .to_u8()
             .unwrap()
@@ -97,16 +97,14 @@ where
     LumaA<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
 {
-    unsafe {
-        // SAFETY: u8,u16,f32 to f32 is safe
-        let max = S::DEFAULT_MAX_VALUE.to_f32().unwrap_unchecked();
-        let LumaA([l, a]) = image;
-        let l = l.to_f32().unwrap_unchecked();
-        let a = a.to_f32().unwrap_unchecked() / max;
-        let l = S::from(l * a).unwrap_unchecked();
-        Luma([l])
-    }
+    let max = f32::from(S::DEFAULT_MAX_VALUE);
+    let LumaA([l, a]) = image;
+    let l = f32::from(l);
+    let a = f32::from(a) / max;
+    let l = S::from(l * a).unwrap();
+    Luma([l])
 }
 
 fn update_bounds(bounds: &mut [u32; 4], x: u32, y: u32) {

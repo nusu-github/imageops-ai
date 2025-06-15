@@ -86,7 +86,8 @@ where
     /// ```
     fn apply_alpha_mask<SM>(&self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, Error>
     where
-        SM: Primitive + 'static;
+        SM: Primitive + 'static,
+        f32: From<SM>;
 }
 
 impl<S> ApplyAlphaMask<S> for Image<Rgb<S>>
@@ -119,10 +120,12 @@ where
     Rgb<S>: Pixel<Subpixel = S>,
     Rgba<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
 {
     fn apply_alpha_mask<SM>(&self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, Error>
     where
         SM: Primitive + 'static,
+        f32: From<SM>,
     {
         // 寸法の一致を確認
         if self.dimensions() != mask.dimensions() {
@@ -130,9 +133,8 @@ where
         }
 
         // 型の最大値を取得してスケーリング用に使用
-        // SとSMは必ずu8, u16, f32なので、uncheckedは安全
-        let source_max = unsafe { S::DEFAULT_MAX_VALUE.to_f32().unwrap_unchecked() };
-        let mask_max = unsafe { SM::DEFAULT_MAX_VALUE.to_f32().unwrap_unchecked() };
+        let source_max = f32::from(S::DEFAULT_MAX_VALUE);
+        let mask_max = f32::from(SM::DEFAULT_MAX_VALUE);
 
         let mut image_buffer = ImageBuffer::new(self.width(), self.height());
 
@@ -140,7 +142,7 @@ where
             let Rgba([red, green, blue, _alpha]) = *pixel;
             let Luma([alpha_value]) = mask.get_pixel(x, y);
 
-            let scaled_alpha = alpha_value.to_f32().unwrap() / mask_max * source_max;
+            let scaled_alpha = f32::from(*alpha_value) / mask_max * source_max;
             let alpha = S::from(scaled_alpha).unwrap();
 
             *pixel = Rgba([red, green, blue, alpha]);
