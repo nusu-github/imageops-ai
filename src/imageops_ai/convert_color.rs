@@ -13,17 +13,16 @@ where
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
     f32: From<S>,
-    S: From<f32>,
 {
     type Output = Image<Luma<S>>;
 
     fn marge_alpha(&self) -> Self::Output {
         let max_value = f32::from(S::DEFAULT_MAX_VALUE);
-        ImageBuffer::from_fn(self.width(), self.height(), |x, y| {
+        ImageBuffer::from_fn(self.width(), self.height(), |x, y| unsafe {
             let LumaA([luminance, alpha]) = *self.get_pixel(x, y);
             let luminance_f32 = f32::from(luminance);
             let alpha_normalized = f32::from(alpha) / max_value;
-            Luma([<S as From<f32>>::from(luminance_f32 * alpha_normalized)])
+            Luma([S::from(luminance_f32 * alpha_normalized).unwrap_unchecked()])
         })
     }
 }
@@ -34,22 +33,21 @@ where
     Rgb<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
     f32: From<S>,
-    S: From<f32>,
 {
     type Output = Image<Rgb<S>>;
 
     fn marge_alpha(&self) -> Self::Output {
         let max_value = f32::from(S::DEFAULT_MAX_VALUE);
-        ImageBuffer::from_fn(self.width(), self.height(), |x, y| {
+        ImageBuffer::from_fn(self.width(), self.height(), |x, y| unsafe {
             let Rgba([red, green, blue, alpha]) = *self.get_pixel(x, y);
             let alpha_normalized = f32::from(alpha) / max_value;
             let red_f32 = f32::from(red);
             let green_f32 = f32::from(green);
             let blue_f32 = f32::from(blue);
             Rgb([
-                <S as From<f32>>::from(red_f32 * alpha_normalized),
-                <S as From<f32>>::from(green_f32 * alpha_normalized),
-                <S as From<f32>>::from(blue_f32 * alpha_normalized),
+                S::from(red_f32 * alpha_normalized).unwrap_unchecked(),
+                S::from(green_f32 * alpha_normalized).unwrap_unchecked(),
+                S::from(blue_f32 * alpha_normalized).unwrap_unchecked(),
             ])
         })
     }
