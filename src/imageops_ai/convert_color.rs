@@ -58,6 +58,7 @@ where
     Rgb<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
 {
     fn estimate_foreground<SM>(self, mask: &Image<Luma<SM>>, r: u32) -> Image<Rgb<S>>
     where
@@ -83,7 +84,7 @@ where
                 self.width(),
                 self.height(),
                 self.iter()
-                    .map(|x| x.to_f32().unwrap_unchecked() / max)
+                    .map(|x| f32::from(*x) / max)
                     .collect(),
             )
             .unwrap_unchecked()
@@ -94,7 +95,7 @@ where
                 mask.width(),
                 mask.height(),
                 mask.iter()
-                    .map(|x| x.to_f32().unwrap_unchecked() / mask_max)
+                    .map(|x| f32::from(*x) / mask_max)
                     .collect(),
             )
             .unwrap_unchecked()
