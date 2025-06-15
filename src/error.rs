@@ -30,6 +30,8 @@ pub enum PaddingError {
     #[error("Padding width ({pad_width}) must be greater than or equal to image width ({width})")]
     PaddingWidthTooSmall { width: u32, pad_width: u32 },
 
-    #[error("Padding height ({pad_height}) must be greater than or equal to image height ({height})")]
+    #[error(
+        "Padding height ({pad_height}) must be greater than or equal to image height ({height})"
+    )]
     PaddingHeightTooSmall { height: u32, pad_height: u32 },
 }

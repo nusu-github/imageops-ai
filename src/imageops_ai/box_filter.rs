@@ -1,11 +1,14 @@
 use crate::error::BoxFilterError;
+use crate::imageops_ai::summed_area_table::{CreateSummedAreaTable, SummedAreaTable};
 use crate::Image;
-use image::{GenericImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgb32FImage};
+use image::{ImageBuffer, Luma, Rgb};
 
-/// ボックスフィルタ操作を提供するトレイト
+/// 積分画像を使用したボックスフィルタ操作を提供するトレイト
 ///
-/// ボックスフィルタは各ピクセルの近傍領域の平均値を計算することで
-/// 画像をぼかす効果を提供します。
+/// このトレイトは積分画像（Summed-Area Table）を使用して
+/// 効率的にボックスフィルタを適用します。
+/// 通常のボックスフィルタと比較して、大きなカーネルサイズでも
+/// 計算時間が一定になる利点があります。
 pub trait BoxFilter {
     /// フィルタ処理の出力型
     type Output;
@@ -13,7 +16,7 @@ pub trait BoxFilter {
     /// フィルタ処理で発生する可能性のあるエラー型
     type Error;
 
-    /// 指定した半径でボックスフィルタを適用する
+    /// 積分画像を使用して指定した半径でボックスフィルタを適用する
     ///
     /// # 引数
     ///
@@ -28,9 +31,16 @@ pub trait BoxFilter {
     ///
     /// * 半径が画像サイズに対して大きすぎる場合
     /// * 空の画像に対して処理を実行した場合
+    /// * 積分画像の作成に失敗した場合
+    ///
+    /// # パフォーマンス
+    ///
+    /// 積分画像を使用するため、カーネルサイズに関係なく
+    /// 一定時間で計算が完了します。大きなカーネルサイズの
+    /// ボックスフィルタに特に有効です。
     fn box_filter(&self, x_radius: u32, y_radius: u32) -> Result<Self::Output, Self::Error>;
 
-    /// 正方形のカーネルでボックスフィルタを適用する
+    /// 積分画像を使用して正方形のカーネルでボックスフィルタを適用する
     ///
     /// # 引数
     ///
@@ -44,8 +54,8 @@ pub trait BoxFilter {
     }
 }
 
-impl BoxFilter for Image<Rgb<f32>> {
-    type Output = Image<Rgb<f32>>;
+impl BoxFilter for Image<Luma<f32>> {
+    type Output = Self;
     type Error = BoxFilterError;
 
     fn box_filter(&self, x_radius: u32, y_radius: u32) -> Result<Self::Output, Self::Error> {
@@ -66,11 +76,16 @@ impl BoxFilter for Image<Rgb<f32>> {
             });
         }
 
-        Ok(apply_box_filter_rgb(self, x_radius, y_radius))
+        // 積分画像を作成
+        let sat = self
+            .create_summed_area_table()
+            .map_err(|_| BoxFilterError::EmptyImage)?;
+
+        Ok(apply_sat_box_filter_luma(&sat, x_radius, y_radius))
     }
 }
 
-impl BoxFilter for Image<Luma<f32>> {
+impl BoxFilter for Image<Luma<u8>> {
     type Output = Image<Luma<f32>>;
     type Error = BoxFilterError;
 
@@ -92,295 +107,245 @@ impl BoxFilter for Image<Luma<f32>> {
             });
         }
 
-        Ok(apply_box_filter_luma(self, x_radius, y_radius))
+        // 積分画像を作成
+        let sat: SummedAreaTable<u32> = self
+            .create_summed_area_table()
+            .map_err(|_| BoxFilterError::EmptyImage)?;
+
+        Ok(apply_sat_box_filter_luma_u8(&sat, x_radius, y_radius))
     }
 }
 
-/// RGB画像にボックスフィルタを適用する内部実装
-///
-/// この関数は画像の各行と列に対して running sum を計算し、
-/// 効率的にボックスフィルタを適用します。
-fn apply_box_filter_rgb(image: &Rgb32FImage, x_radius: u32, y_radius: u32) -> Image<Rgb<f32>> {
-    let (width, height) = image.dimensions();
-    let mut out = ImageBuffer::new(width, height);
+impl BoxFilter for Image<Rgb<f32>> {
+    type Output = Self;
+    type Error = BoxFilterError;
 
-    let kernel_width = (2 * x_radius + 1) as f32;
-    let kernel_height = (2 * y_radius + 1) as f32;
+    fn box_filter(&self, x_radius: u32, y_radius: u32) -> Result<Self::Output, Self::Error> {
+        let (width, height) = self.dimensions();
 
-    // 水平方向のフィルタリング
-    let mut row_buffer = vec![[0.0; 3]; (width + 2 * x_radius) as usize];
-    for y in 0..height {
-        compute_row_running_sum_rgb(image, y, &mut row_buffer, x_radius);
-
-        // 最初のピクセル
-        let val = row_buffer[(2 * x_radius) as usize].map(|v| v / kernel_width);
-        unsafe {
-            debug_assert!(out.in_bounds(0, y));
-            out.unsafe_put_pixel(0, y, Rgb(val));
+        // 画像が空の場合のチェック
+        if width == 0 || height == 0 {
+            return Err(BoxFilterError::EmptyImage);
         }
 
-        // 残りのピクセル
-        for x in 1..width {
-            let u = (x + 2 * x_radius) as usize;
-            let l = (x - 1) as usize;
-            let val = [0, 1, 2].map(|i| (row_buffer[u][i] - row_buffer[l][i]) / kernel_width);
-            unsafe {
-                debug_assert!(out.in_bounds(x, y));
-                out.unsafe_put_pixel(x, y, Rgb(val));
-            }
+        // 半径が適切かチェック
+        if x_radius >= width || y_radius >= height {
+            return Err(BoxFilterError::RadiusTooLarge {
+                x_radius,
+                y_radius,
+                width,
+                height,
+            });
         }
+
+        Ok(apply_sat_box_filter_rgb(self, x_radius, y_radius))
     }
-
-    // 垂直方向のフィルタリング
-    let mut col_buffer = vec![[0.0; 3]; (height + 2 * y_radius) as usize];
-    for x in 0..width {
-        compute_column_running_sum_rgb(&out, x, &mut col_buffer, y_radius);
-
-        // 最初のピクセル
-        let val = col_buffer[(2 * y_radius) as usize].map(|v| v / kernel_height);
-        unsafe {
-            debug_assert!(out.in_bounds(x, 0));
-            out.unsafe_put_pixel(x, 0, Rgb(val));
-        }
-
-        // 残りのピクセル
-        for y in 1..height {
-            let u = (y + 2 * y_radius) as usize;
-            let l = (y - 1) as usize;
-            let val = [0, 1, 2].map(|i| (col_buffer[u][i] - col_buffer[l][i]) / kernel_height);
-            unsafe {
-                debug_assert!(out.in_bounds(x, y));
-                out.unsafe_put_pixel(x, y, Rgb(val));
-            }
-        }
-    }
-
-    out
 }
 
-/// Luma画像にボックスフィルタを適用する内部実装
-fn apply_box_filter_luma(
-    image: &Image<Luma<f32>>,
-    x_radius: u32,
-    y_radius: u32,
-) -> Image<Luma<f32>> {
-    let (width, height) = image.dimensions();
-    let mut out = ImageBuffer::new(width, height);
+impl BoxFilter for Image<Rgb<u8>> {
+    type Output = Image<Rgb<f32>>;
+    type Error = BoxFilterError;
 
-    let kernel_width = (2 * x_radius + 1) as f32;
-    let kernel_height = (2 * y_radius + 1) as f32;
+    fn box_filter(&self, x_radius: u32, y_radius: u32) -> Result<Self::Output, Self::Error> {
+        let (width, height) = self.dimensions();
 
-    // 水平方向のフィルタリング
-    let mut row_buffer = vec![0.0; (width + 2 * x_radius) as usize];
-    for y in 0..height {
-        compute_row_running_sum_luma(image, y, &mut row_buffer, x_radius);
-
-        // 最初のピクセル
-        let val = row_buffer[(2 * x_radius) as usize] / kernel_width;
-        unsafe {
-            debug_assert!(out.in_bounds(0, y));
-            out.unsafe_put_pixel(0, y, Luma([val]));
+        // 画像が空の場合のチェック
+        if width == 0 || height == 0 {
+            return Err(BoxFilterError::EmptyImage);
         }
 
-        // 残りのピクセル
-        for x in 1..width {
-            let u = (x + 2 * x_radius) as usize;
-            let l = (x - 1) as usize;
-            let val = (row_buffer[u] - row_buffer[l]) / kernel_width;
-            unsafe {
-                debug_assert!(out.in_bounds(x, y));
-                out.unsafe_put_pixel(x, y, Luma([val]));
-            }
+        // 半径が適切かチェック
+        if x_radius >= width || y_radius >= height {
+            return Err(BoxFilterError::RadiusTooLarge {
+                x_radius,
+                y_radius,
+                width,
+                height,
+            });
         }
+
+        Ok(apply_sat_box_filter_rgb_u8(self, x_radius, y_radius))
     }
-
-    // 垂直方向のフィルタリング
-    let mut col_buffer = vec![0.0; (height + 2 * y_radius) as usize];
-    for x in 0..width {
-        compute_column_running_sum_luma(&out, x, &mut col_buffer, y_radius);
-
-        // 最初のピクセル
-        let val = col_buffer[(2 * y_radius) as usize] / kernel_height;
-        unsafe {
-            debug_assert!(out.in_bounds(x, 0));
-            out.unsafe_put_pixel(x, 0, Luma([val]));
-        }
-
-        // 残りのピクセル
-        for y in 1..height {
-            let u = (y + 2 * y_radius) as usize;
-            let l = (y - 1) as usize;
-            let val = (col_buffer[u] - col_buffer[l]) / kernel_height;
-            unsafe {
-                debug_assert!(out.in_bounds(x, y));
-                out.unsafe_put_pixel(x, y, Luma([val]));
-            }
-        }
-    }
-
-    out
 }
 
-/// RGB画像の指定行のrunning sumを計算する
+/// 積分画像を使用してLuma<f32>画像にボックスフィルタを適用する内部実装
 ///
 /// # 引数
 ///
-/// * `image` - 対象画像
-/// * `row` - 行番号
-/// * `buffer` - 結果を格納するバッファ
-/// * `padding` - パディング幅
-fn compute_row_running_sum_rgb(
-    image: &Rgb32FImage,
-    row: u32,
-    buffer: &mut [[f32; 3]],
-    padding: u32,
-) {
-    let (width, _height) = image.dimensions();
-    let (width, padding) = (width as usize, padding as usize);
+/// * `sat` - 積分画像
+/// * `x_radius` - X方向の半径
+/// * `y_radius` - Y方向の半径
+///
+/// # 戻り値
+///
+/// フィルタ処理された画像
+fn apply_sat_box_filter_luma(
+    sat: &SummedAreaTable<f32>,
+    x_radius: u32,
+    y_radius: u32,
+) -> Image<Luma<f32>> {
+    let width = sat.width();
+    let height = sat.height();
+    let mut output = ImageBuffer::new(width, height);
 
-    let row_data = &(**image)[width * row as usize * 3..][..width * 3];
-    let first = [row_data[0], row_data[1], row_data[2]];
-    let last = [
-        row_data[width * 3 - 3],
-        row_data[width * 3 - 2],
-        row_data[width * 3 - 1],
-    ];
+    let _kernel_area = ((2 * x_radius + 1) * (2 * y_radius + 1)) as f32;
 
-    let mut sum = [0.0; 3];
+    for y in 0..height {
+        for x in 0..width {
+            // 矩形領域の境界を計算
+            let x1 = (x as i32).saturating_sub(x_radius as i32);
+            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x2 = ((x + x_radius).min(width - 1)) as i32;
+            let y2 = ((y + y_radius).min(height - 1)) as i32;
 
-    // 左側のパディング
-    for b in &mut buffer[..padding] {
-        for i in 0..3 {
-            sum[i] += first[i];
-            b[i] = sum[i];
+            // 積分画像を使用して矩形領域の合計を計算
+            let sum = sat.rectangle_sum(x1, y1, x2, y2);
+
+            // 実際のカーネルサイズを計算（境界での調整）
+            let actual_width = (x2 - x1 + 1) as f32;
+            let actual_height = (y2 - y1 + 1) as f32;
+            let actual_area = actual_width * actual_height;
+
+            // 平均値を計算
+            let average = sum / actual_area;
+
+            output.put_pixel(x, y, Luma([average]));
         }
     }
 
-    // メイン部分
-    for (b, chunk) in buffer[padding..].iter_mut().zip(row_data.chunks(3)) {
-        for i in 0..3 {
-            sum[i] += chunk[i];
-            b[i] = sum[i];
-        }
-    }
-
-    // 右側のパディング
-    for b in &mut buffer[padding + width..] {
-        for i in 0..3 {
-            sum[i] += last[i];
-            b[i] = sum[i];
-        }
-    }
+    output
 }
 
-/// RGB画像の指定列のrunning sumを計算する
-fn compute_column_running_sum_rgb(
-    image: &Rgb32FImage,
-    column: u32,
-    buffer: &mut [[f32; 3]],
-    padding: u32,
-) {
-    let (_width, height) = image.dimensions();
+/// 積分画像を使用してLuma<u8>画像にボックスフィルタを適用する内部実装
+fn apply_sat_box_filter_luma_u8(
+    sat: &SummedAreaTable<u32>,
+    x_radius: u32,
+    y_radius: u32,
+) -> Image<Luma<f32>> {
+    let width = sat.width();
+    let height = sat.height();
+    let mut output = ImageBuffer::new(width, height);
 
-    let first = image.get_pixel(column, 0).0;
-    let last = image.get_pixel(column, height - 1).0;
+    for y in 0..height {
+        for x in 0..width {
+            // 矩形領域の境界を計算
+            let x1 = (x as i32).saturating_sub(x_radius as i32);
+            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x2 = ((x + x_radius).min(width - 1)) as i32;
+            let y2 = ((y + y_radius).min(height - 1)) as i32;
 
-    let mut sum = [0.0; 3];
+            // 積分画像を使用して矩形領域の合計を計算
+            let sum = sat.rectangle_sum(x1, y1, x2, y2) as f32;
 
-    // 上側のパディング
-    for b in &mut buffer[..padding as usize] {
-        for i in 0..3 {
-            sum[i] += first[i];
-            b[i] = sum[i];
+            // 実際のカーネルサイズを計算（境界での調整）
+            let actual_width = (x2 - x1 + 1) as f32;
+            let actual_height = (y2 - y1 + 1) as f32;
+            let actual_area = actual_width * actual_height;
+
+            // 平均値を計算
+            let average = sum / actual_area;
+
+            output.put_pixel(x, y, Luma([average]));
         }
     }
 
-    // メイン部分
-    unsafe {
-        for y in 0..height {
-            let pixel = image.unsafe_get_pixel(column, y).0;
-            for i in 0..3 {
-                sum[i] += pixel[i];
-                buffer.get_unchecked_mut(y as usize + padding as usize)[i] = sum[i];
-            }
-        }
-    }
-
-    // 下側のパディング
-    for b in &mut buffer[padding as usize + height as usize..] {
-        for i in 0..3 {
-            sum[i] += last[i];
-            b[i] = sum[i];
-        }
-    }
+    output
 }
 
-/// Luma画像の指定行のrunning sumを計算する
-fn compute_row_running_sum_luma(
-    image: &Image<Luma<f32>>,
-    row: u32,
-    buffer: &mut [f32],
-    padding: u32,
-) {
-    let (width, _height) = image.dimensions();
-    let (width, padding) = (width as usize, padding as usize);
+/// 積分画像を使用してRGB<f32>画像にボックスフィルタを適用する内部実装
+///
+/// RGB画像は各チャンネルを個別に処理します
+fn apply_sat_box_filter_rgb(
+    image: &Image<Rgb<f32>>,
+    x_radius: u32,
+    y_radius: u32,
+) -> Image<Rgb<f32>> {
+    let (width, height) = image.dimensions();
+    let mut output = ImageBuffer::new(width, height);
 
-    let row_data = &(**image)[width * row as usize..][..width];
-    let first = row_data[0];
-    let last = row_data[width - 1];
+    // 各チャンネルの積分画像を作成
+    let r_data: Vec<f32> = image.pixels().map(|p| p[0]).collect();
+    let g_data: Vec<f32> = image.pixels().map(|p| p[1]).collect();
+    let b_data: Vec<f32> = image.pixels().map(|p| p[2]).collect();
 
-    let mut sum = 0.0;
+    let r_sat = SummedAreaTable::from_data(&r_data, width, height);
+    let g_sat = SummedAreaTable::from_data(&g_data, width, height);
+    let b_sat = SummedAreaTable::from_data(&b_data, width, height);
 
-    // 左側のパディング
-    for b in &mut buffer[..padding] {
-        sum += first;
-        *b = sum;
-    }
+    for y in 0..height {
+        for x in 0..width {
+            // 矩形領域の境界を計算
+            let x1 = (x as i32).saturating_sub(x_radius as i32);
+            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x2 = ((x + x_radius).min(width - 1)) as i32;
+            let y2 = ((y + y_radius).min(height - 1)) as i32;
 
-    // メイン部分
-    for (b, &pixel) in buffer[padding..].iter_mut().zip(row_data) {
-        sum += pixel;
-        *b = sum;
-    }
+            // 各チャンネルの合計を計算
+            let r_sum = r_sat.rectangle_sum(x1, y1, x2, y2);
+            let g_sum = g_sat.rectangle_sum(x1, y1, x2, y2);
+            let b_sum = b_sat.rectangle_sum(x1, y1, x2, y2);
 
-    // 右側のパディング
-    for b in &mut buffer[padding + width..] {
-        sum += last;
-        *b = sum;
-    }
-}
+            // 実際のカーネルサイズを計算
+            let actual_width = (x2 - x1 + 1) as f32;
+            let actual_height = (y2 - y1 + 1) as f32;
+            let actual_area = actual_width * actual_height;
 
-/// Luma画像の指定列のrunning sumを計算する
-fn compute_column_running_sum_luma(
-    image: &Image<Luma<f32>>,
-    column: u32,
-    buffer: &mut [f32],
-    padding: u32,
-) {
-    let (_width, height) = image.dimensions();
+            // 各チャンネルの平均値を計算
+            let r_avg = r_sum / actual_area;
+            let g_avg = g_sum / actual_area;
+            let b_avg = b_sum / actual_area;
 
-    let first = image.get_pixel(column, 0)[0];
-    let last = image.get_pixel(column, height - 1)[0];
-
-    let mut sum = 0.0;
-
-    // 上側のパディング
-    for b in &mut buffer[..padding as usize] {
-        sum += first;
-        *b = sum;
-    }
-
-    // メイン部分
-    unsafe {
-        for y in 0..height {
-            sum += image.unsafe_get_pixel(column, y)[0];
-            *buffer.get_unchecked_mut(y as usize + padding as usize) = sum;
+            output.put_pixel(x, y, Rgb([r_avg, g_avg, b_avg]));
         }
     }
 
-    // 下側のパディング
-    for b in &mut buffer[padding as usize + height as usize..] {
-        sum += last;
-        *b = sum;
+    output
+}
+
+/// 積分画像を使用してRGB<u8>画像にボックスフィルタを適用する内部実装
+fn apply_sat_box_filter_rgb_u8(
+    image: &Image<Rgb<u8>>,
+    x_radius: u32,
+    y_radius: u32,
+) -> Image<Rgb<f32>> {
+    let (width, height) = image.dimensions();
+    let mut output = ImageBuffer::new(width, height);
+
+    // 各チャンネルのu32データを作成（オーバーフロー防止）
+    let r_data: Vec<u32> = image.pixels().map(|p| u32::from(p[0])).collect();
+    let g_data: Vec<u32> = image.pixels().map(|p| u32::from(p[1])).collect();
+    let b_data: Vec<u32> = image.pixels().map(|p| u32::from(p[2])).collect();
+
+    let r_sat = SummedAreaTable::from_data(&r_data, width, height);
+    let g_sat = SummedAreaTable::from_data(&g_data, width, height);
+    let b_sat = SummedAreaTable::from_data(&b_data, width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            // 矩形領域の境界を計算
+            let x1 = (x as i32).saturating_sub(x_radius as i32);
+            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x2 = ((x + x_radius).min(width - 1)) as i32;
+            let y2 = ((y + y_radius).min(height - 1)) as i32;
+
+            // 各チャンネルの合計を計算
+            let r_sum = r_sat.rectangle_sum(x1, y1, x2, y2) as f32;
+            let g_sum = g_sat.rectangle_sum(x1, y1, x2, y2) as f32;
+            let b_sum = b_sat.rectangle_sum(x1, y1, x2, y2) as f32;
+
+            // 実際のカーネルサイズを計算
+            let actual_width = (x2 - x1 + 1) as f32;
+            let actual_height = (y2 - y1 + 1) as f32;
+            let actual_area = actual_width * actual_height;
+
+            // 各チャンネルの平均値を計算
+            let r_avg = r_sum / actual_area;
+            let g_avg = g_sum / actual_area;
+            let b_avg = b_sum / actual_area;
+
+            output.put_pixel(x, y, Rgb([r_avg, g_avg, b_avg]));
+        }
     }
+
+    output
 }

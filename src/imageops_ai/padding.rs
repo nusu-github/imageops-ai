@@ -1,6 +1,6 @@
+use crate::error::PaddingError;
 use image::{imageops, ImageBuffer, Pixel};
 use num_traits::AsPrimitive;
-use crate::error::PaddingError;
 
 /// パディング位置を指定する列挙型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

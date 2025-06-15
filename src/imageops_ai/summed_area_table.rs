@@ -103,7 +103,7 @@ impl CreateSummedAreaTable<u32> for Image<Luma<u8>> {
 
         for y in 0..height {
             for x in 0..width {
-                let pixel_value = self.get_pixel(x, y).channels()[0] as u32;
+                let pixel_value = u32::from(self.get_pixel(x, y).channels()[0]);
                 let current_index = (y * width + x) as usize;
 
                 // 積分画像の計算式:
@@ -112,17 +112,17 @@ impl CreateSummedAreaTable<u32> for Image<Luma<u8>> {
 
                 // 左のピクセルの値を加算
                 if x > 0 {
-                    sum = sum + data[current_index - 1];
+                    sum += data[current_index - 1];
                 }
 
                 // 上のピクセルの値を加算
                 if y > 0 {
-                    sum = sum + data[((y - 1) * width + x) as usize];
+                    sum += data[((y - 1) * width + x) as usize];
                 }
 
                 // 左上のピクセルの値を減算（重複分を除去）
                 if x > 0 && y > 0 {
-                    sum = sum - data[((y - 1) * width + (x - 1)) as usize];
+                    sum -= data[((y - 1) * width + (x - 1)) as usize];
                 }
 
                 data[current_index] = sum;
@@ -148,6 +148,7 @@ where
     ///
     /// # 戻り値
     /// 作成された積分画像
+    #[must_use]
     pub fn from_image<P>(image: &ImageBuffer<P, Vec<P::Subpixel>>) -> Self
     where
         P: Pixel<Subpixel = T>,
@@ -245,6 +246,7 @@ where
     ///
     /// # 戻り値
     /// 積分画像の値、座標が範囲外の場合は0
+    #[must_use]
     pub fn get(&self, x: i32, y: i32) -> T {
         if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
             T::zero()
@@ -266,6 +268,7 @@ where
     ///
     /// # 計算式
     /// Sum = sat(x2, y2) - sat(x1-1, y2) - sat(x2, y1-1) + sat(x1-1, y1-1)
+    #[must_use]
     pub fn rectangle_sum(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> T {
         // 範囲チェック
         let x1 = x1.max(0);
@@ -288,16 +291,19 @@ where
     }
 
     /// 画像の幅を取得します
-    pub fn width(&self) -> u32 {
+    #[must_use]
+    pub const fn width(&self) -> u32 {
         self.width
     }
 
     /// 画像の高さを取得します
-    pub fn height(&self) -> u32 {
+    #[must_use]
+    pub const fn height(&self) -> u32 {
         self.height
     }
 
     /// 積分画像の生データへの参照を取得します
+    #[must_use]
     pub fn data(&self) -> &[T] {
         &self.data
     }

@@ -1,10 +1,6 @@
+use crate::imageops_ai::box_filter::BoxFilter;
 use crate::Image;
 use image::{ImageBuffer, Luma, LumaA, Pixel, Primitive, Rgb, Rgb32FImage, Rgba};
-use crate::imageops_ai::box_filter::BoxFilter;
-
-// Constants for foreground estimation algorithm
-const MIN_DENOMINATOR: f32 = 1e-5;
-const SECONDARY_BLUR_RADIUS: u32 = 6;
 
 pub trait MargeAlpha {
     type Output;
@@ -16,16 +12,18 @@ where
     LumaA<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
+    S: From<f32>,
 {
     type Output = Image<Luma<S>>;
 
     fn marge_alpha(&self) -> Self::Output {
-        let max_value = S::DEFAULT_MAX_VALUE.to_f32().unwrap();
+        let max_value = f32::from(S::DEFAULT_MAX_VALUE);
         ImageBuffer::from_fn(self.width(), self.height(), |x, y| {
-            let LumaA([luminance, alpha]) = self.get_pixel(x, y);
-            let luminance_f32 = luminance.to_f32().unwrap();
-            let alpha_normalized = alpha.to_f32().unwrap() / max_value;
-            Luma([S::from(luminance_f32 * alpha_normalized).unwrap()])
+            let LumaA([luminance, alpha]) = *self.get_pixel(x, y);
+            let luminance_f32 = f32::from(luminance);
+            let alpha_normalized = f32::from(alpha) / max_value;
+            Luma([<S as From<f32>>::from(luminance_f32 * alpha_normalized)])
         })
     }
 }
@@ -35,17 +33,24 @@ where
     Rgba<S>: Pixel<Subpixel = S>,
     Rgb<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
+    f32: From<S>,
+    S: From<f32>,
 {
     type Output = Image<Rgb<S>>;
 
     fn marge_alpha(&self) -> Self::Output {
-        let max_value = S::DEFAULT_MAX_VALUE.to_f32().unwrap();
+        let max_value = f32::from(S::DEFAULT_MAX_VALUE);
         ImageBuffer::from_fn(self.width(), self.height(), |x, y| {
-            let Rgba([red, green, blue, alpha]) = self.get_pixel(x, y);
-            let alpha_normalized = alpha.to_f32().unwrap() / max_value;
-            let apply_alpha =
-                |channel: &S| S::from(channel.to_f32().unwrap() * alpha_normalized).unwrap();
-            Rgb([apply_alpha(red), apply_alpha(green), apply_alpha(blue)])
+            let Rgba([red, green, blue, alpha]) = *self.get_pixel(x, y);
+            let alpha_normalized = f32::from(alpha) / max_value;
+            let red_f32 = f32::from(red);
+            let green_f32 = f32::from(green);
+            let blue_f32 = f32::from(blue);
+            Rgb([
+                <S as From<f32>>::from(red_f32 * alpha_normalized),
+                <S as From<f32>>::from(green_f32 * alpha_normalized),
+                <S as From<f32>>::from(blue_f32 * alpha_normalized),
+            ])
         })
     }
 }
@@ -67,7 +72,7 @@ where
     Luma<S>: Pixel<Subpixel = S>,
     S: Primitive + 'static,
 {
-    fn estimate_foreground<SM>(self, mask: &Image<Luma<SM>>, r: u32) -> Image<Rgb<S>>
+    fn estimate_foreground<SM>(self, mask: &Image<Luma<SM>>, r: u32) -> Self
     where
         SM: Primitive + 'static,
     {
@@ -80,7 +85,7 @@ where
                     .map(|x| x.to_f32().unwrap_unchecked() / max)
                     .collect(),
             )
-                .unwrap_unchecked()
+            .unwrap_unchecked()
         };
         let mask_max = SM::DEFAULT_MAX_VALUE.to_f32().unwrap();
         let alpha = unsafe {
@@ -91,7 +96,7 @@ where
                     .map(|x| x.to_f32().unwrap_unchecked() / mask_max)
                     .collect(),
             )
-                .unwrap_unchecked()
+            .unwrap_unchecked()
         };
 
         let image = estimate(&image, &alpha, r);
@@ -105,7 +110,7 @@ where
                     .map(|x| S::from(x * max).unwrap_unchecked())
                     .collect(),
             )
-                .unwrap_unchecked()
+            .unwrap_unchecked()
         }
     }
 }
@@ -139,7 +144,7 @@ fn blur_fusion_estimator(
                 })
                 .collect(),
         )
-            .unwrap_unchecked()
+        .unwrap_unchecked()
     };
     let blurred_fa = blurred_fa.box_filter(r, r).expect("blurred fa");
     let blurred_f: Rgb32FImage = unsafe {
@@ -157,7 +162,7 @@ fn blur_fusion_estimator(
                 })
                 .collect(),
         )
-            .unwrap_unchecked()
+        .unwrap_unchecked()
     };
 
     let blurred_b1a: Rgb32FImage = unsafe {
@@ -174,7 +179,7 @@ fn blur_fusion_estimator(
                 })
                 .collect(),
         )
-            .unwrap_unchecked()
+        .unwrap_unchecked()
     };
     let blurred_b1a = blurred_b1a.box_filter(r, r).expect("blurred b1a");
     let blurred_b: Rgb32FImage = unsafe {
@@ -192,7 +197,7 @@ fn blur_fusion_estimator(
                 })
                 .collect(),
         )
-            .unwrap_unchecked()
+        .unwrap_unchecked()
     };
 
     let updated_f: Rgb32FImage = unsafe {
@@ -207,9 +212,9 @@ fn blur_fusion_estimator(
                 .zip(blurred_b.pixels())
                 .flat_map(
                     |(
-                         (((f_pixel, image_pixel), alpha_pixel), f_blurred_pixel),
-                         b_blurred_pixel,
-                     )| {
+                        (((f_pixel, image_pixel), alpha_pixel), f_blurred_pixel),
+                        b_blurred_pixel,
+                    )| {
                         let Rgb([f_r, f_g, f_b]) = f_pixel;
                         let Rgb([r, g, b]) = image_pixel;
                         let Luma([a]) = alpha_pixel;
@@ -225,7 +230,7 @@ fn blur_fusion_estimator(
                 )
                 .collect(),
         )
-            .unwrap_unchecked()
+        .unwrap_unchecked()
     };
 
     (updated_f, blurred_b)
