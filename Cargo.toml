@@ -5,8 +5,18 @@ edition = "2021"
 
 [features]
 default = []
+parallel = ["rayon"]
+simd = []
 
 [dependencies]
 image = { version = "0.25", default-features = false }
 num-traits = "0.2"
 thiserror = "2.0"
+rayon = { version = "1.10", optional = true }
+
+[dev-dependencies]
+criterion = "0.6"
+
+[[bench]]
+name = "alpha_mask_bench"
+harness = false

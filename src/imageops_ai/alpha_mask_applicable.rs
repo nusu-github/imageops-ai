@@ -105,10 +105,10 @@ where
         let mut image_buffer = ImageBuffer::new(self.width(), self.height());
 
         for (x, y, pixel) in image_buffer.enumerate_pixels_mut() {
-            let Rgba([red, green, blue, _alpha]) = *pixel;
-            let Luma([alpha_value]) = mask.get_pixel(x, y);
+            let Rgb([red, green, blue]) = *self.get_pixel(x, y);
+            let Luma([alpha_value]) = *mask.get_pixel(x, y);
 
-            *pixel = Rgba([red, green, blue, *alpha_value]);
+            *pixel = Rgba([red, green, blue, alpha_value]);
         }
 
         Ok(image_buffer)
@@ -139,11 +139,20 @@ where
         let mut image_buffer = ImageBuffer::new(self.width(), self.height());
 
         for (x, y, pixel) in image_buffer.enumerate_pixels_mut() {
-            let Rgba([red, green, blue, _alpha]) = *pixel;
-            let Luma([alpha_value]) = mask.get_pixel(x, y);
+            let Rgb([red, green, blue]) = *self.get_pixel(x, y);
+            let Luma([alpha_value]) = *mask.get_pixel(x, y);
 
-            let scaled_alpha = f32::from(*alpha_value) / mask_max * source_max;
-            let alpha = S::from(scaled_alpha).unwrap();
+            let scaled_alpha =
+                (f32::from(alpha_value) / mask_max * source_max).clamp(0.0, source_max);
+
+            // 安全な変換
+            let alpha = S::from(scaled_alpha).unwrap_or_else(|| {
+                if scaled_alpha >= source_max {
+                    S::DEFAULT_MAX_VALUE
+                } else {
+                    S::DEFAULT_MIN_VALUE
+                }
+            });
 
             *pixel = Rgba([red, green, blue, alpha]);
         }
