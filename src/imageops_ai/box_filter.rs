@@ -188,13 +188,11 @@ fn apply_sat_box_filter_luma(
     let height = sat.height();
     let mut output = ImageBuffer::new(width, height);
 
-    let _kernel_area = ((2 * x_radius + 1) * (2 * y_radius + 1)) as f32;
-
     for y in 0..height {
         for x in 0..width {
             // 矩形領域の境界を計算
-            let x1 = (x as i32).saturating_sub(x_radius as i32);
-            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x1 = (x as i32).saturating_sub(x_radius as i32).max(0);
+            let y1 = (y as i32).saturating_sub(y_radius as i32).max(0);
             let x2 = ((x + x_radius).min(width - 1)) as i32;
             let y2 = ((y + y_radius).min(height - 1)) as i32;
 
@@ -229,8 +227,8 @@ fn apply_sat_box_filter_luma_u8(
     for y in 0..height {
         for x in 0..width {
             // 矩形領域の境界を計算
-            let x1 = (x as i32).saturating_sub(x_radius as i32);
-            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x1 = (x as i32).saturating_sub(x_radius as i32).max(0);
+            let y1 = (y as i32).saturating_sub(y_radius as i32).max(0);
             let x2 = ((x + x_radius).min(width - 1)) as i32;
             let y2 = ((y + y_radius).min(height - 1)) as i32;
 
@@ -275,8 +273,8 @@ fn apply_sat_box_filter_rgb(
     for y in 0..height {
         for x in 0..width {
             // 矩形領域の境界を計算
-            let x1 = (x as i32).saturating_sub(x_radius as i32);
-            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x1 = (x as i32).saturating_sub(x_radius as i32).max(0);
+            let y1 = (y as i32).saturating_sub(y_radius as i32).max(0);
             let x2 = ((x + x_radius).min(width - 1)) as i32;
             let y2 = ((y + y_radius).min(height - 1)) as i32;
 
@@ -323,8 +321,8 @@ fn apply_sat_box_filter_rgb_u8(
     for y in 0..height {
         for x in 0..width {
             // 矩形領域の境界を計算
-            let x1 = (x as i32).saturating_sub(x_radius as i32);
-            let y1 = (y as i32).saturating_sub(y_radius as i32);
+            let x1 = (x as i32).saturating_sub(x_radius as i32).max(0);
+            let y1 = (y as i32).saturating_sub(y_radius as i32).max(0);
             let x2 = ((x + x_radius).min(width - 1)) as i32;
             let y2 = ((y + y_radius).min(height - 1)) as i32;
 
@@ -348,4 +346,97 @@ fn apply_sat_box_filter_rgb_u8(
     }
 
     output
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Luma};
+
+    #[test]
+    fn test_box_filter_luma_f32_basic() {
+        // 3x3の単純な画像でテスト
+        let data = vec![
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+        ];
+        let image = ImageBuffer::<Luma<f32>, Vec<f32>>::from_vec(3, 3, data).unwrap();
+        
+        // 半径1のボックスフィルタ
+        let result = image.box_filter(1, 1).unwrap();
+        
+        // 中央のピクセル(1,1)は全ての周囲のピクセルの平均値
+        // (1+2+3+4+5+6+7+8+9) / 9 = 5.0
+        let center_pixel = result.get_pixel(1, 1);
+        assert_eq!(center_pixel[0], 5.0);
+    }
+
+    #[test]
+    fn test_box_filter_edge_handling() {
+        // 3x3の画像で境界処理をテスト
+        let data = vec![
+            1.0, 2.0, 3.0,
+            4.0, 5.0, 6.0,
+            7.0, 8.0, 9.0,
+        ];
+        let image = ImageBuffer::<Luma<f32>, Vec<f32>>::from_vec(3, 3, data).unwrap();
+        
+        // 半径1のボックスフィルタ
+        let result = image.box_filter(1, 1).unwrap();
+        
+        // 左上隅(0,0)は2x2領域の平均
+        // (1+2+4+5) / 4 = 3.0
+        let corner_pixel = result.get_pixel(0, 0);
+        assert_eq!(corner_pixel[0], 3.0);
+        
+        // 上端中央(1,0)は3x2領域の平均
+        // (1+2+3+4+5+6) / 6 = 3.5
+        let edge_pixel = result.get_pixel(1, 0);
+        assert_eq!(edge_pixel[0], 3.5);
+    }
+
+    #[test]
+    fn test_box_filter_radius_too_large() {
+        // 3x3の画像
+        let data = vec![1.0; 9];
+        let image: ImageBuffer<Luma<f32>, Vec<f32>> = ImageBuffer::from_vec(3, 3, data).unwrap();
+        
+        // 半径が画像サイズ以上の場合エラー
+        assert!(matches!(
+            image.box_filter(3, 3),
+            Err(BoxFilterError::RadiusTooLarge { .. })
+        ));
+        
+        // 半径が幅と同じ場合もエラー（>= のチェック）
+        assert!(matches!(
+            image.box_filter(3, 2),
+            Err(BoxFilterError::RadiusTooLarge { .. })
+        ));
+        
+        // 半径が高さと同じ場合もエラー
+        assert!(matches!(
+            image.box_filter(2, 3),
+            Err(BoxFilterError::RadiusTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn test_box_filter_maximum_valid_radius() {
+        // 5x5の画像
+        let data = vec![1.0; 25];
+        let image: ImageBuffer<Luma<f32>, Vec<f32>> = ImageBuffer::from_vec(5, 5, data).unwrap();
+        
+        // 最大有効半径は width-1 と height-1
+        // 半径4は成功するはず
+        let result = image.box_filter(4, 4);
+        assert!(result.is_ok());
+        
+        // 半径5はエラー
+        assert!(matches!(
+            image.box_filter(5, 4),
+            Err(BoxFilterError::RadiusTooLarge { .. })
+        ));
+    }
 }
