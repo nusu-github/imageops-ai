@@ -2,11 +2,16 @@
 name = "imageops-ai"
 version = "0.1.0"
 edition = "2021"
-
-[features]
-default = []
+authors = ["nusu-github"]
+description = "AI-powered image operations library for advanced image processing tasks"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/nusu-github/imageops-ai"
+documentation = "https://docs.rs/imageops-ai"
+repository = "https://github.com/nusu-github/imageops-ai"
+keywords = ["image", "ai", "processing", "alpha", "foreground"]
+categories = ["multimedia::images", "computer-vision"]
 
 [dependencies]
 image = { version = "0.25", default-features = false }
-num-traits = "0.2"
+imageproc = { version = "0.25", default-features = false }
 thiserror = "2.0"

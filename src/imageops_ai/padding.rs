@@ -1,46 +1,45 @@
 use crate::error::PaddingError;
-use crate::Image;
-use image::{imageops, Pixel};
-use num_traits::AsPrimitive;
+use image::{GenericImage, ImageBuffer, Pixel};
+use imageproc::definitions::Image;
 
-/// パディング位置を指定する列挙型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Enum to specify padding position
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Position {
-    /// 上部中央
+    /// Top center
     Top,
-    /// 下部中央
+    /// Bottom center
     Bottom,
-    /// 左側中央
+    /// Left center
     Left,
-    /// 右側中央
+    /// Right center
     Right,
-    /// 左上
+    /// Top left
     TopLeft,
-    /// 右上
+    /// Top right
     TopRight,
-    /// 左下
+    /// Bottom left
     BottomLeft,
-    /// 右下
+    /// Bottom right
     BottomRight,
-    /// 中央
+    /// Center
     Center,
 }
 
-/// 画像サイズとパディングサイズから位置を計算する
+/// Calculate position from image size and padding size
 ///
-/// # 引数
+/// # Arguments
 ///
-/// * `size` - 元画像のサイズ (幅, 高さ)
-/// * `pad_size` - パディング後のサイズ (幅, 高さ)
-/// * `position` - パディング位置
+/// * `size` - Original image size (width, height)
+/// * `pad_size` - Padded size (width, height)
+/// * `position` - Padding position
 ///
-/// # 戻り値
+/// # Returns
 ///
-/// 成功時は画像を配置する位置 (x, y) を返す
+/// Returns the position (x, y) where the image should be placed on success
 ///
-/// # エラー
+/// # Errors
 ///
-/// * パディングサイズが元画像サイズより小さい場合
+/// * Returns error when padding size is smaller than original image size
 pub fn calculate_position(
     size: (u32, u32),
     pad_size: (u32, u32),
@@ -69,22 +68,81 @@ pub fn calculate_position(
         Position::Center => ((pad_width - width) / 2, (pad_height - height) / 2),
     };
 
-    Ok((x.as_(), y.as_()))
+    Ok((x.into(), y.into()))
 }
 
-/// パディング操作を提供するトレイト
+/// Add padding with specified size and position (function-based implementation)
+///
+/// # Arguments
+///
+/// * `image` - Original image
+/// * `pad_size` - Padded size (width, height)
+/// * `position` - Padding position
+/// * `color` - Padding color
+///
+/// # Returns
+///
+/// Padded image
+///
+/// # Examples
+/// ```
+/// use image::{Rgb, RgbImage};
+/// use imageproc::definitions::Image;
+/// use imageops_ai::padding::{add_padding, Position};
+///
+/// let image: RgbImage = RgbImage::new(10, 10);
+/// let padded = add_padding(&image, (20, 20), Position::Center, Rgb([255, 255, 255])).unwrap();
+/// assert_eq!(padded.dimensions(), (20, 20));
+/// ```
+pub fn add_padding<I, P>(
+    image: &I,
+    pad_size: (u32, u32),
+    position: Position,
+    color: P,
+) -> Result<Image<P>, PaddingError>
+where
+    I: GenericImage<Pixel = P>,
+    P: Pixel,
+{
+    let (width, height) = image.dimensions();
+    let (x, y) = calculate_position((width, height), pad_size, position)?;
+    let (pad_width, pad_height) = pad_size;
+
+    // Create padded image using efficient pixel operations
+    let mut out: ImageBuffer<P, Vec<P::Subpixel>> =
+        ImageBuffer::from_pixel(pad_width, pad_height, color);
+
+    // Copy original image to new position
+    for src_y in 0..height {
+        for src_x in 0..width {
+            let dst_x = (x + src_x as i64) as u32;
+            let dst_y = (y + src_y as i64) as u32;
+
+            if dst_x < pad_width && dst_y < pad_height {
+                unsafe {
+                    let pixel = image.unsafe_get_pixel(src_x, src_y);
+                    out.unsafe_put_pixel(dst_x, dst_y, pixel);
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+/// Trait that provides padding operations (maintains compatibility with existing code)
 pub trait Padding<P: Pixel> {
-    /// 指定したサイズと位置でパディングを追加する
+    /// Add padding with specified size and position
     ///
-    /// # 引数
+    /// # Arguments
     ///
-    /// * `pad_size` - パディング後のサイズ (幅, 高さ)
-    /// * `position` - パディング位置
-    /// * `color` - パディング色
+    /// * `pad_size` - Padded size (width, height)
+    /// * `position` - Padding position
+    /// * `color` - Padding color
     ///
-    /// # 戻り値
+    /// # Returns
     ///
-    /// パディング済み画像と元画像の配置位置のタプル
+    /// Tuple of padded image and original image placement position
     fn add_padding(
         self,
         pad_size: (u32, u32),
@@ -92,25 +150,25 @@ pub trait Padding<P: Pixel> {
         color: P,
     ) -> Result<(Image<P>, (u32, u32)), PaddingError>;
 
-    /// 正方形になるようにパディングを追加する
+    /// Add padding to make the image square
     ///
-    /// # 引数
+    /// # Arguments
     ///
-    /// * `color` - パディング色
+    /// * `color` - Padding color
     ///
-    /// # 戻り値
+    /// # Returns
     ///
-    /// パディング済み画像と元画像の配置位置のタプル
+    /// Tuple of padded image and original image placement position
     fn add_padding_square(self, color: P) -> Result<(Image<P>, (u32, u32)), PaddingError>;
 
-    /// パディング位置を計算する
+    /// Calculate padding position
     fn calculate_padding_position(
         &self,
         pad_size: (u32, u32),
         position: Position,
     ) -> Result<(i64, i64), PaddingError>;
 
-    /// 正方形パディングの位置とサイズを計算する
+    /// Calculate position and size for square padding
     fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError>;
 }
 
@@ -122,10 +180,8 @@ impl<P: Pixel> Padding<P> for Image<P> {
         color: P,
     ) -> Result<(Self, (u32, u32)), PaddingError> {
         let (x, y) = self.calculate_padding_position(pad_size, position)?;
-        let (pad_width, pad_height) = pad_size;
-        let mut canvas = Self::from_pixel(pad_width, pad_height, color);
-        imageops::overlay(&mut canvas, &self, x, y);
-        Ok((canvas, (x as u32, y as u32)))
+        let padded = add_padding(&self, pad_size, position, color)?;
+        Ok((padded, (x as u32, y as u32)))
     }
 
     fn add_padding_square(self, color: P) -> Result<(Self, (u32, u32)), PaddingError> {
