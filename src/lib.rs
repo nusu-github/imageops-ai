@@ -43,14 +43,19 @@
 //! - `serde`: Enables serialization support (optional)
 
 mod error;
-mod imageops_ai;
+pub mod imageops_ai;
+mod utils;
 
-pub use error::{ConvertColorError, Error, PaddingError};
+#[cfg(test)]
+mod test_utils;
+
+pub use error::{AlphaMaskError, ClipBorderError, ConvertColorError, NLMeansError, PaddingError};
 pub use imageops_ai::alpha_premultiply::AlphaPremultiply;
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ApplyAlphaMaskConvert};
-pub use imageops_ai::blur_fusion::ForegroundEstimator;
+pub use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
-pub use imageops_ai::padding::{Padding, Position};
+pub use imageops_ai::nlmeans::NLMeans;
+pub use imageops_ai::padding::{add_padding, Padding, Position};
 
 // Re-export imageproc::definitions::Image for convenience
 pub use imageproc::definitions::Image;

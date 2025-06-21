@@ -88,7 +88,7 @@ pub fn calculate_position(
 /// ```
 /// use image::{Rgb, RgbImage};
 /// use imageproc::definitions::Image;
-/// use imageops_ai::padding::{add_padding, Position};
+/// use imageops_ai::{add_padding, Position};
 ///
 /// let image: RgbImage = RgbImage::new(10, 10);
 /// let padded = add_padding(&image, (20, 20), Position::Center, Rgb([255, 255, 255])).unwrap();
@@ -209,5 +209,150 @@ impl<P: Pixel> Padding<P> for Image<P> {
 
         self.calculate_padding_position(pad_size, Position::Center)
             .map(|(x, y)| ((x, y), pad_size))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::*;
+    use image::Rgb;
+
+    #[test]
+    fn test_calculate_position() {
+        // Test center position
+        let pos = calculate_position((10, 10), (20, 20), Position::Center);
+        assert_eq!(pos, Ok((5, 5)));
+
+        // Test top-left position
+        let pos = calculate_position((10, 10), (20, 20), Position::TopLeft);
+        assert_eq!(pos, Ok((0, 0)));
+
+        // Test top-right position
+        let pos = calculate_position((10, 10), (20, 20), Position::TopRight);
+        assert_eq!(pos, Ok((10, 0)));
+
+        // Test bottom-left position
+        let pos = calculate_position((10, 10), (20, 20), Position::BottomLeft);
+        assert_eq!(pos, Ok((0, 10)));
+
+        // Test bottom-right position
+        let pos = calculate_position((10, 10), (20, 20), Position::BottomRight);
+        assert_eq!(pos, Ok((10, 10)));
+    }
+
+    #[test]
+    fn test_add_padding_function() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]); // White
+
+        // Test padding to larger size
+        let result = add_padding(&image, (4, 4), Position::Center, fill_color);
+        assert!(result.is_ok());
+
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (4, 4));
+
+        // Test invalid padding (smaller than original)
+        let result = add_padding(&image, (1, 1), Position::Center, fill_color);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PaddingError::PaddingWidthTooSmall { .. }
+        ));
+    }
+
+    #[test]
+    fn test_padding_trait() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]); // White
+
+        // Store original pixels before moving image
+        let orig_00 = *image.get_pixel(0, 0);
+        let orig_10 = *image.get_pixel(1, 0);
+        let orig_01 = *image.get_pixel(0, 1);
+        let orig_11 = *image.get_pixel(1, 1);
+
+        // Test regular padding
+        let result = image.add_padding((4, 4), Position::TopLeft, fill_color);
+        assert!(result.is_ok());
+
+        let (padded, position) = result.unwrap();
+        assert_eq!(padded.dimensions(), (4, 4));
+        assert_eq!(position, (0, 0));
+
+        // Verify original content is preserved
+        assert_eq!(*padded.get_pixel(0, 0), orig_00);
+        assert_eq!(*padded.get_pixel(1, 0), orig_10);
+        assert_eq!(*padded.get_pixel(0, 1), orig_01);
+        assert_eq!(*padded.get_pixel(1, 1), orig_11);
+    }
+
+    #[test]
+    fn test_square_padding() {
+        // Test rectangular image (width > height)
+        let mut image: Image<Rgb<u8>> = Image::new(6, 4);
+        for y in 0..4 {
+            for x in 0..6 {
+                image.put_pixel(x, y, Rgb([100, 150, 200]));
+            }
+        }
+
+        let result = image.add_padding_square(Rgb([255, 255, 255]));
+        assert!(result.is_ok());
+
+        let (padded, position) = result.unwrap();
+        assert_eq!(padded.dimensions(), (6, 6)); // Should be square
+        assert_eq!(position, (0, 1)); // Centered vertically
+
+        // Test square image (no padding needed)
+        let square_image: Image<Rgb<u8>> = Image::new(4, 4);
+        let result = square_image.add_padding_square(Rgb([255, 255, 255]));
+        assert!(result.is_ok());
+
+        let (padded, position) = result.unwrap();
+        assert_eq!(padded.dimensions(), (4, 4));
+        assert_eq!(position, (0, 0));
+    }
+
+    #[test]
+    fn test_calculate_padding_position_errors() {
+        let image = create_test_rgb_image(); // 2x2 image
+
+        // Test padding size too small (width)
+        let result = image.calculate_padding_position((1, 4), Position::Center);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PaddingError::PaddingWidthTooSmall { .. }
+        ));
+
+        // Test padding size too small (height)
+        let result = image.calculate_padding_position((4, 1), Position::Center);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PaddingError::PaddingHeightTooSmall { .. }
+        ));
+    }
+
+    #[test]
+    fn test_padding_position_calculation() {
+        let image = create_test_rgb_image(); // 2x2 image
+
+        // Test all positions with 6x6 padding
+        let positions = [
+            (Position::TopLeft, (0, 0)),
+            (Position::TopRight, (4, 0)),
+            (Position::BottomLeft, (0, 4)),
+            (Position::BottomRight, (4, 4)),
+            (Position::Center, (2, 2)),
+        ];
+
+        for (pos, expected) in positions {
+            let result = image.calculate_padding_position((6, 6), pos);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), expected);
+        }
     }
 }

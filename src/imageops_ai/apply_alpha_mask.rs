@@ -1,4 +1,5 @@
-use crate::error::Error;
+use crate::error::AlphaMaskError;
+use crate::utils::{clamp_f32_to_primitive, validate_matching_dimensions};
 use image::{Luma, Pixel, Primitive, Rgb, Rgba};
 use imageproc::definitions::{Clamp, Image};
 use imageproc::map::map_colors2;
@@ -42,7 +43,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    fn apply_alpha_mask(&self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, Error>;
+    fn apply_alpha_mask(&self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, AlphaMaskError>;
 }
 
 /// Trait providing functionality to apply alpha masks to images (with type conversion support)
@@ -85,7 +86,10 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    fn apply_alpha_mask<SM>(&self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, Error>
+    fn apply_alpha_mask<SM>(
+        &self,
+        mask: &Image<Luma<SM>>,
+    ) -> Result<Image<Rgba<S>>, AlphaMaskError>
     where
         SM: Into<f32> + Primitive;
 }
@@ -96,7 +100,7 @@ where
     Rgba<S>: Pixel<Subpixel = S>,
     S: Primitive,
 {
-    fn apply_alpha_mask(&self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, Error> {
+    fn apply_alpha_mask(&self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, AlphaMaskError> {
         validate_dimensions(self, mask)?;
 
         let result = map_colors2(self, mask, |Rgb([red, green, blue]), Luma([alpha])| {
@@ -113,7 +117,7 @@ where
     Rgba<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
-    fn apply_alpha_mask<SM>(&self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, Error>
+    fn apply_alpha_mask<SM>(&self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, AlphaMaskError>
     where
         SM: Into<f32> + Primitive,
     {
@@ -139,45 +143,25 @@ where
 
 /// Function to validate dimensions
 #[inline]
-fn validate_dimensions<P1, P2>(image: &Image<P1>, mask: &Image<P2>) -> Result<(), Error>
+fn validate_dimensions<P1, P2>(image: &Image<P1>, mask: &Image<P2>) -> Result<(), AlphaMaskError>
 where
     P1: Pixel,
     P2: Pixel,
 {
-    let image_dims = image.dimensions();
-    let mask_dims = mask.dimensions();
+    let (img_w, img_h) = image.dimensions();
+    let (mask_w, mask_h) = mask.dimensions();
 
-    if image_dims != mask_dims {
-        return Err(Error::DimensionMismatch {
-            expected: image_dims,
-            actual: mask_dims,
-        });
-    }
-
-    Ok(())
-}
-
-/// Function to clamp and convert f32 values to primitive types
-#[inline]
-fn clamp_f32_to_primitive<T>(value: f32) -> T
-where
-    T: Clamp<f32> + Primitive,
-{
-    T::clamp(value)
+    validate_matching_dimensions(img_w, img_h, mask_w, mask_h, "ApplyAlphaMask").map_err(|_| {
+        AlphaMaskError::DimensionMismatch {
+            expected: (img_w, img_h),
+            actual: (mask_w, mask_h),
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_clamp_f32_to_primitive() {
-        assert_eq!(clamp_f32_to_primitive::<u8>(-10.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(0.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(127.5), 127);
-        assert_eq!(clamp_f32_to_primitive::<u8>(255.0), 255);
-        assert_eq!(clamp_f32_to_primitive::<u8>(300.0), 255);
-    }
 
     #[test]
     fn test_validate_dimensions() {

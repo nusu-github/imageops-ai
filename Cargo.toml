@@ -11,7 +11,20 @@ repository = "https://github.com/nusu-github/imageops-ai"
 keywords = ["image", "ai", "processing", "alpha", "foreground"]
 categories = ["multimedia::images", "computer-vision"]
 
+[features]
+default = []
+
+test = ["image/png"]
+
 [dependencies]
 image = { version = "0.25", default-features = false }
 imageproc = { version = "0.25", default-features = false }
 thiserror = "2.0"
+
+[dev-dependencies]
+criterion = { version = "0.6", features = ["html_reports"] }
+proptest = "1.5"
+
+[[bench]]
+name = "imageops_benchmarks"
+harness = false

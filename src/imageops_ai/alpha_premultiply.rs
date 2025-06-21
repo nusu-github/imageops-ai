@@ -1,4 +1,5 @@
 use crate::error::ConvertColorError;
+use crate::utils::{clamp_f32_to_primitive, normalize_alpha_with_max, validate_non_empty_image};
 use image::{Luma, LumaA, Pixel, Primitive, Rgb, Rgba};
 use imageproc::definitions::{Clamp, Image};
 use imageproc::map::map_colors;
@@ -34,7 +35,7 @@ pub trait AlphaPremultiply {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::alpha_premultiply::AlphaPremultiply;
+    /// use imageops_ai::AlphaPremultiply;
     /// use imageproc::definitions::Image;
     /// use image::Rgba;
     ///
@@ -63,7 +64,7 @@ where
 
         Ok(map_colors(self, |pixel| {
             let LumaA([luminance, alpha]) = pixel;
-            let alpha_normalized = normalize_alpha(alpha, max_value);
+            let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
             let luminance_f32 = luminance.into();
 
             // Apply premultiplication with proper clamping
@@ -91,21 +92,12 @@ where
 
         Ok(map_colors(self, |pixel| {
             let Rgba([red, green, blue, alpha]) = pixel;
-            let alpha_normalized = normalize_alpha(alpha, max_value);
+            let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
 
             // Convert to f32 and premultiply with optimized computation
             compute_premultiplied_rgb_pixel([red, green, blue], alpha_normalized)
         }))
     }
-}
-
-/// Normalizes alpha value to [0.0, 1.0] range
-#[inline]
-fn normalize_alpha<S>(alpha: S, max_value: f32) -> f32
-where
-    S: Into<f32> + Primitive,
-{
-    alpha.into() / max_value
 }
 
 /// Computes premultiplied RGB pixel with proper clamping
@@ -124,15 +116,6 @@ where
     Rgb(result)
 }
 
-/// Clamps f32 to primitive type range using imageproc's Clamp trait
-#[inline]
-fn clamp_f32_to_primitive<S>(value: f32) -> S
-where
-    S: Primitive + Clamp<f32>,
-{
-    S::clamp(value)
-}
-
 /// Validates image dimensions for processing
 fn validate_image_dimensions<P>(image: &Image<P>) -> Result<(), ConvertColorError>
 where
@@ -140,37 +123,19 @@ where
 {
     let (width, height) = image.dimensions();
 
-    if width == 0 || height == 0 {
-        return Err(ConvertColorError::DimensionMismatch {
+    validate_non_empty_image(width, height, "AlphaPremultiply").map_err(|_| {
+        ConvertColorError::DimensionMismatch {
             expected_width: 1,
             expected_height: 1,
             actual_width: width,
             actual_height: height,
-        });
-    }
-
-    Ok(())
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_normalize_alpha() {
-        assert_eq!(normalize_alpha(0u8, 255.0), 0.0);
-        assert_eq!(normalize_alpha(127u8, 255.0), 127.0 / 255.0);
-        assert_eq!(normalize_alpha(255u8, 255.0), 1.0);
-    }
-
-    #[test]
-    fn test_clamp_f32_to_primitive() {
-        assert_eq!(clamp_f32_to_primitive::<u8>(-10.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(0.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(127.5), 127);
-        assert_eq!(clamp_f32_to_primitive::<u8>(255.0), 255);
-        assert_eq!(clamp_f32_to_primitive::<u8>(300.0), 255);
-    }
 
     #[test]
     fn test_compute_premultiplied_rgb_pixel() {

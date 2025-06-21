@@ -80,7 +80,7 @@
 //! ### Basic Usage
 //!
 //! ```rust
-//! use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
+//! use imageops_ai::{estimate_foreground, ForegroundEstimator};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Luma};
 //!
@@ -101,7 +101,7 @@
 //! ### Blur-Fusion x2 (2 iterations)
 //!
 //! ```rust
-//! # use imageops_ai::blur_fusion::estimate_foreground;
+//! # use imageops_ai::estimate_foreground;
 //! # use imageproc::definitions::Image;
 //! # use image::{Rgb, Luma};
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -146,7 +146,8 @@
 //! [2] Porter, T., & Duff, T. "Compositing digital images."
 //!     ACM SIGGRAPH Computer Graphics, 1984.
 
-use crate::Error;
+use crate::utils::{clamp_f32_to_primitive, validate_matching_dimensions};
+use crate::AlphaMaskError;
 use image::{Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
 use imageproc::filter::box_filter;
@@ -161,8 +162,7 @@ pub trait ForegroundEstimator<S>
 where
     Rgb<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
-    S: Primitive + Clamp<f32>,
-    f32: From<S>,
+    S: Into<f32> + Clamp<f32> + Primitive,
 {
     /// Performs Blur-Fusion foreground estimation on the image
     ///
@@ -177,17 +177,20 @@ where
         self,
         alpha: &Image<Luma<S>>,
         radius: u32,
-    ) -> Result<Image<Rgb<S>>, Error>;
+    ) -> Result<Image<Rgb<S>>, AlphaMaskError>;
 }
 
 impl<S> ForegroundEstimator<S> for Image<Rgb<S>>
 where
     Rgb<S>: Pixel<Subpixel = S>,
     Luma<S>: Pixel<Subpixel = S>,
-    S: Primitive + Clamp<f32>,
-    f32: From<S>,
+    S: Into<f32> + Clamp<f32> + Primitive,
 {
-    fn estimate_foreground(self, alpha: &Image<Luma<S>>, radius: u32) -> Result<Self, Error> {
+    fn estimate_foreground(
+        self,
+        alpha: &Image<Luma<S>>,
+        radius: u32,
+    ) -> Result<Self, AlphaMaskError> {
         estimate_foreground(&self, alpha, radius, 1)
     }
 }
@@ -213,7 +216,7 @@ where
 ///
 /// # Examples
 /// ```no_run
-/// use imageops_ai::blur_fusion::estimate_foreground;
+/// use imageops_ai::estimate_foreground;
 /// use imageproc::definitions::Image;
 /// use image::{Rgb, Luma};
 ///
@@ -229,12 +232,12 @@ where
 /// # Ok(())
 /// # }
 /// ```
-fn estimate_foreground<T>(
+pub fn estimate_foreground<T>(
     image: &Image<Rgb<T>>,
     alpha: &Image<Luma<T>>,
     radius: u32,
     iterations: u8,
-) -> Result<Image<Rgb<T>>, Error>
+) -> Result<Image<Rgb<T>>, AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
     Luma<T>: Pixel<Subpixel = T>,
@@ -250,7 +253,7 @@ where
         1 => vec![radius],
         2 => vec![90, 6], // Standard Blur-Fusion x2 radii
         _ => {
-            return Err(Error::InvalidParameter(
+            return Err(AlphaMaskError::InvalidParameter(
                 "iterations must be 1 or 2".to_string(),
             ))
         }
@@ -274,7 +277,7 @@ fn apply_blur_fusion_step<T>(
     foreground: &mut Image<Rgb<T>>,
     background: &Image<Rgb<T>>,
     radius: u32,
-) -> Result<(), Error>
+) -> Result<(), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
     Luma<T>: Pixel<Subpixel = T>,
@@ -317,7 +320,7 @@ fn compute_optimized_smoothed_estimates<T>(
     background: &Image<Rgb<T>>,
     alpha: &Image<Luma<T>>,
     radius: u32,
-) -> Result<(Image<Rgb<T>>, Image<Rgb<T>>), Error>
+) -> Result<(Image<Rgb<T>>, Image<Rgb<T>>), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
     Luma<T>: Pixel<Subpixel = T>,
@@ -335,16 +338,16 @@ where
     let bg_g = green_channel(background);
     let bg_b = blue_channel(background);
 
-    // Create weighted images for efficient box filtering
+    // Create weighted images for efficient box filtering (normalized to u8 for box_filter)
     let mut fg_weighted = [
-        Image::new(width, height),
-        Image::new(width, height),
-        Image::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
     ];
     let mut bg_weighted = [
-        Image::new(width, height),
-        Image::new(width, height),
-        Image::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
     ];
 
     let max_val = T::DEFAULT_MAX_VALUE.into();
@@ -354,67 +357,67 @@ where
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_alpha = alpha_val / max_val;
         let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     fg_weighted[1] = map_pixels(&fg_g, |x, y, pixel| {
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_alpha = alpha_val / max_val;
         let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     fg_weighted[2] = map_pixels(&fg_b, |x, y, pixel| {
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_alpha = alpha_val / max_val;
         let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     bg_weighted[0] = map_pixels(&bg_r, |x, y, pixel| {
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_beta = 1.0 - (alpha_val / max_val);
         let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     bg_weighted[1] = map_pixels(&bg_g, |x, y, pixel| {
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_beta = 1.0 - (alpha_val / max_val);
         let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     bg_weighted[2] = map_pixels(&bg_b, |x, y, pixel| {
         let alpha_val = alpha.get_pixel(x, y)[0].into();
         let normalized_beta = 1.0 - (alpha_val / max_val);
         let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_u8(weighted_val)])
+        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
     });
 
     // Create alpha and beta weight images
     let alpha_weights: Image<Luma<u8>> = map_pixels(alpha, |_x, _y, pixel| {
         let alpha_val = pixel[0].into();
         let normalized_alpha = alpha_val / max_val;
-        Luma([clamp_f32_to_u8(normalized_alpha * 255.0)])
+        Luma([clamp_f32_to_primitive::<u8>(normalized_alpha * 255.0)])
     });
 
     let beta_weights: Image<Luma<u8>> = map_pixels(alpha, |_x, _y, pixel| {
         let alpha_val = pixel[0].into();
         let normalized_beta = 1.0 - (alpha_val / max_val);
-        Luma([clamp_f32_to_u8(normalized_beta * 255.0)])
+        Luma([clamp_f32_to_primitive::<u8>(normalized_beta * 255.0)])
     });
 
-    // Apply box filter to all weighted images
+    // Apply box filter to all weighted images (u8 normalized)
     let mut fg_blurred = [
-        Image::new(width, height),
-        Image::new(width, height),
-        Image::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
     ];
     let mut bg_blurred = [
-        Image::new(width, height),
-        Image::new(width, height),
-        Image::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
+        Image::<Luma<u8>>::new(width, height),
     ];
 
     for c in 0..3 {
@@ -434,7 +437,7 @@ where
         for c in 0..3 {
             if alpha_weight > 0.0 {
                 let fg_sum = f32::from(fg_blurred[c].get_pixel(x, y)[0]) / 255.0;
-                fg_channels[c] = clamp_f32_to_generic((fg_sum / alpha_weight) * max_val);
+                fg_channels[c] = clamp_f32_to_primitive((fg_sum / alpha_weight) * max_val);
             } else {
                 fg_channels[c] = fg_pixel[c];
             }
@@ -451,7 +454,7 @@ where
         for c in 0..3 {
             if beta_weight > 0.0 {
                 let bg_sum = f32::from(bg_blurred[c].get_pixel(x, y)[0]) / 255.0;
-                bg_channels[c] = clamp_f32_to_generic((bg_sum / beta_weight) * max_val);
+                bg_channels[c] = clamp_f32_to_primitive((bg_sum / beta_weight) * max_val);
             } else {
                 bg_channels[c] = bg_pixel[c];
             }
@@ -461,12 +464,6 @@ where
     });
 
     Ok((f_hat, b_hat))
-}
-
-/// Helper function to clamp f32 to u8 range using imageproc's Clamp trait
-#[inline]
-fn clamp_f32_to_u8(x: f32) -> u8 {
-    Clamp::clamp(x)
 }
 
 /// Computes the final foreground pixel using Equation 7
@@ -490,19 +487,10 @@ where
         let correction = beta.mul_add(-b_hat_c, alpha.mul_add(-f_hat_c, i_c));
         let final_val = alpha.mul_add(correction, f_hat_c);
 
-        result[c] = clamp_f32_to_generic(final_val);
+        result[c] = clamp_f32_to_primitive(final_val);
     }
 
     Rgb(result)
-}
-
-/// Clamps f32 to generic numeric type range using imageproc's Clamp trait
-#[inline]
-fn clamp_f32_to_generic<T>(x: f32) -> T
-where
-    T: Primitive + Clamp<f32>,
-{
-    T::clamp(x)
 }
 
 /// Validates input parameters
@@ -516,28 +504,30 @@ fn validate_inputs<T>(
     alpha: &Image<Luma<T>>,
     radius: u32,
     iterations: u8,
-) -> Result<(), Error>
+) -> Result<(), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
     Luma<T>: Pixel<Subpixel = T>,
     T: Primitive,
 {
-    let img_dims = image.dimensions();
-    let alpha_dims = alpha.dimensions();
+    let (img_w, img_h) = image.dimensions();
+    let (alpha_w, alpha_h) = alpha.dimensions();
 
-    if img_dims != alpha_dims {
-        return Err(Error::DimensionMismatch {
-            expected: img_dims,
-            actual: alpha_dims,
-        });
-    }
+    validate_matching_dimensions(img_w, img_h, alpha_w, alpha_h, "ForegroundEstimator").map_err(
+        |_| AlphaMaskError::DimensionMismatch {
+            expected: (img_w, img_h),
+            actual: (alpha_w, alpha_h),
+        },
+    )?;
 
     if radius == 0 {
-        return Err(Error::InvalidParameter("radius must be > 0".to_string()));
+        return Err(AlphaMaskError::InvalidParameter(
+            "radius must be > 0".to_string(),
+        ));
     }
 
     if iterations == 0 || iterations > 2 {
-        return Err(Error::InvalidParameter(
+        return Err(AlphaMaskError::InvalidParameter(
             "iterations must be 1 or 2".to_string(),
         ));
     }
@@ -548,15 +538,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_clamp_f32_to_generic() {
-        assert_eq!(clamp_f32_to_generic::<u8>(-10.0), 0);
-        assert_eq!(clamp_f32_to_generic::<u8>(0.0), 0);
-        assert_eq!(clamp_f32_to_generic::<u8>(127.5), 127);
-        assert_eq!(clamp_f32_to_generic::<u8>(255.0), 255);
-        assert_eq!(clamp_f32_to_generic::<u8>(300.0), 255);
-    }
 
     #[test]
     fn test_validate_inputs() {
