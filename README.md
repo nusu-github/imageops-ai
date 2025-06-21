@@ -8,13 +8,16 @@ AI 画像処理操作のための Rust ライブラリ
 
 ## 概要
 
-このクレートは、高度な画像処理タスクのための専門的な操作を提供します：
+このクレートは、高度な画像処理タスクのための専門的な操作を提供します。
+
+### 主な機能
 
 - **アルファ前乗算**: カラーチャンネルにアルファ値を前乗算
 - **アルファマスク適用**: RGB 画像にグレースケールマスクを適用して RGBA 画像を生成
 - **前景色推定**: Blur-Fusion アルゴリズムを使用した前景色推定
 - **境界クリッピング**: 最小境界の自動検出とクリッピング
 - **パディング**: 様々な位置でのスマートパディング
+- **NL‑Means ノイズ除去**: 近傍画素の類似度を利用したノイズ低減
 
 ## 使用例
 
@@ -48,6 +51,18 @@ let (padded, _position) = image.add_padding(
 [dependencies]
 imageops-ai = "0.1"
 ```
+
+## ドキュメント
+
+詳しい API 仕様は [docs.rs](https://docs.rs/imageops-ai) を参照してください。
+
+## 参考文献
+
+- **Blur-Fusion**: A. Germer, "Approximate Fast Foreground Colour Estimation," ICIP 2021.
+
+## 貢献
+
+バグ報告やプルリクエストを歓迎します。GitHub の [issue トラッカー](https://github.com/nusu-github/imageops-ai/issues) でご連絡ください。
 
 ## ライセンス
 

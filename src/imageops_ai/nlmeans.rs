@@ -39,7 +39,7 @@ use std::f32;
 /// let mut rgb_image = ImageBuffer::new(10, 10);
 /// for y in 0..10 {
 ///     for x in 0..10 {
-///         rgb_image.put_pixel(x, y, Rgb([100, 150, 200]));
+///         rgb_image.put_pixel(x, y, Rgb([100u8, 150u8, 200u8]));
 ///     }
 /// }
 ///
