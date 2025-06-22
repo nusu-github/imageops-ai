@@ -56,7 +56,7 @@ pub use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
 pub use imageops_ai::nlmeans::NLMeans;
 pub use imageops_ai::padding::{add_padding, Padding, Position};
-pub use utils::{unify_gray_images, unify_rgb_images, LargerType};
+pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 // Re-export imageproc::definitions::Image for convenience
 pub use imageproc::definitions::Image;

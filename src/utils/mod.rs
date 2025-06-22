@@ -3,7 +3,7 @@
 //! This module contains common functionality used across different image operations.
 
 mod unify;
-pub use unify::{unify_gray_images, unify_rgb_images, LargerType};
+pub use unify::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 use image::Primitive;
 use imageproc::definitions::Clamp;
