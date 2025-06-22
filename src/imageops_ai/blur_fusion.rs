@@ -158,6 +158,10 @@ use imageproc::map::{blue_channel, green_channel, map_pixels, red_channel};
 /// This trait provides convenient method chaining for foreground estimation
 /// functionality on RGB images. Internally, it calls the `estimate_foreground`
 /// function with 1 iteration.
+///
+/// Note: This operation requires creating new images for the blurred estimates,
+/// so there is no `_mut` variant available. The algorithm always requires
+/// allocation of new buffers for intermediate calculations.
 pub trait ForegroundEstimator<S>
 where
     Rgb<S>: Pixel<Subpixel = S>,
@@ -165,6 +169,8 @@ where
     S: Into<f32> + Clamp<f32> + Primitive,
 {
     /// Performs Blur-Fusion foreground estimation on the image
+    ///
+    /// This consumes the original image.
     ///
     /// # Arguments
     /// * `alpha` - Alpha matte (grayscale image)
@@ -178,6 +184,16 @@ where
         alpha: &Image<Luma<S>>,
         radius: u32,
     ) -> Result<Image<Rgb<S>>, AlphaMaskError>;
+
+    /// Hidden _mut variant that is not available for this operation
+    #[doc(hidden)]
+    fn estimate_foreground_mut(
+        &mut self,
+        _alpha: &Image<Luma<S>>,
+        _radius: u32,
+    ) -> Result<&mut Self, AlphaMaskError> {
+        unimplemented!("estimate_foreground_mut is not available because the algorithm requires new buffer allocations")
+    }
 }
 
 impl<S> ForegroundEstimator<S> for Image<Rgb<S>>

@@ -17,6 +17,7 @@ fn create_minimal_rgb_image() -> Image<Rgb<u8>> {
 }
 
 /// Helper to create minimal 1x1 RGBA image
+#[allow(dead_code)]
 fn create_minimal_rgba_image() -> Image<Rgba<u8>> {
     let mut image: Image<Rgba<u8>> = Image::new(1, 1);
     image.put_pixel(0, 0, Rgba([128, 128, 128, 128]));
@@ -37,7 +38,7 @@ fn test_minimum_image_size_operations() {
     let mask = create_minimal_alpha_mask();
 
     // Alpha mask application
-    let result = image.apply_alpha_mask(&mask);
+    let result = image.clone().apply_alpha_mask(&mask);
     assert!(result.is_ok());
     assert_eq!(result.unwrap().dimensions(), (1, 1));
 
@@ -113,7 +114,7 @@ fn test_dimension_mismatch_errors() {
     wrong_mask.put_pixel(1, 1, Luma([128]));
 
     // Alpha mask application should fail
-    let result = image.apply_alpha_mask(&wrong_mask);
+    let result = image.clone().apply_alpha_mask(&wrong_mask);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -195,11 +196,10 @@ fn test_extreme_color_values() {
     image.put_pixel(1, 0, Rgb([255, 255, 255])); // White
     image.put_pixel(2, 0, Rgb([255, 0, 128])); // Mixed extreme
 
-    let mask = create_minimal_alpha_mask();
     let large_mask: Image<Luma<u8>> = Image::from_fn(3, 1, |_, _| Luma([128]));
 
     // Test alpha mask application
-    let result = image.apply_alpha_mask(&large_mask);
+    let result = image.clone().apply_alpha_mask(&large_mask);
     assert!(result.is_ok());
 
     // Test foreground estimation
@@ -238,7 +238,7 @@ fn test_all_padding_positions_edge_cases() {
             );
 
             // Verify original pixel is at the right location
-            let original_pixel = padded.get_pixel(actual_pos.0, actual_pos.1);
+            let original_pixel = padded.get_pixel(actual_pos.0 as u32, actual_pos.1 as u32);
             assert_eq!(*original_pixel, Rgb([128, 128, 128])); // Original pixel color
         }
     }
@@ -332,15 +332,14 @@ fn test_memory_stress_with_padding() {
             height
         );
 
-        if let Ok((padded, _)) = result {
-            assert_eq!(padded.dimensions(), (width, height));
+        let (padded, _) = result.unwrap();
+        assert_eq!(padded.dimensions(), (width, height));
 
-            // Verify center pixel exists and has correct value
-            let center_x = width / 2;
-            let center_y = height / 2;
-            let center_pixel = padded.get_pixel(center_x, center_y);
-            assert_eq!(*center_pixel, Rgb([128, 128, 128]));
-        }
+        // Verify center pixel exists and has correct value
+        let center_x = width / 2;
+        let center_y = height / 2;
+        let center_pixel = padded.get_pixel(center_x, center_y);
+        assert_eq!(*center_pixel, Rgb([128, 128, 128]));
     }
 }
 
@@ -379,9 +378,11 @@ fn test_numerical_precision_edge_cases() {
             for x in 0..3 {
                 let pixel = rgb_image.get_pixel(x, y);
                 // All components should be valid u8 values (no overflow/underflow)
-                assert!(pixel[0] <= 255);
-                assert!(pixel[1] <= 255);
-                assert!(pixel[2] <= 255);
+                // These assertions are technically redundant for u8 (always true)
+                // but left for documentation purposes
+                let _r = pixel[0];
+                let _g = pixel[1];
+                let _b = pixel[2];
             }
         }
     }

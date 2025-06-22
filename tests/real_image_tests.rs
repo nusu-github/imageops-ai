@@ -7,6 +7,7 @@ use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use std::path::{Path, PathBuf};
 
 /// Get the path to test resources directory
+#[allow(dead_code)]
 fn resources_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -14,6 +15,7 @@ fn resources_dir() -> PathBuf {
 }
 
 /// Create a test RGB image with realistic content and save it as PNG
+#[allow(dead_code)]
 fn create_and_save_test_rgb_image(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut image: RgbImage = ImageBuffer::new(width, height);
 
@@ -57,6 +59,7 @@ fn create_and_save_test_rgb_image(filename: &str, width: u32, height: u32) -> Pa
 }
 
 /// Create a test RGBA image with transparency and save it as PNG
+#[allow(dead_code)]
 fn create_and_save_test_rgba_image(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut image: RgbaImage = ImageBuffer::new(width, height);
 
@@ -92,6 +95,7 @@ fn create_and_save_test_rgba_image(filename: &str, width: u32, height: u32) -> P
 }
 
 /// Create a test alpha mask and save it as grayscale PNG
+#[allow(dead_code)]
 fn create_and_save_test_alpha_mask(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut mask: GrayImage = ImageBuffer::new(width, height);
 

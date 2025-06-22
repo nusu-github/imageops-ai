@@ -2,6 +2,9 @@
 //!
 //! This module contains common functionality used across different image operations.
 
+mod unify;
+pub use unify::{unify_gray_images, unify_rgb_images, LargerType};
+
 use image::Primitive;
 use imageproc::definitions::Clamp;
 
@@ -32,6 +35,7 @@ pub fn clamp_f32_to_primitive<T: Primitive + Clamp<f32>>(value: f32) -> T {
 ///
 /// The normalized alpha value as a floating-point number between 0 and 1
 #[inline]
+#[allow(dead_code)]
 pub fn normalize_alpha<S>(alpha: S) -> f32
 where
     S: Into<f32> + Primitive,

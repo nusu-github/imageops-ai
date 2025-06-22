@@ -29,7 +29,7 @@
 //!
 //! // Image padding
 //! let image: Image<Rgb<u8>> = Image::new(50, 50);
-//! let (padded, _position) = image.add_padding(
+//! let (padded, position) = image.add_padding(
 //!     (100, 100),
 //!     Position::Center,
 //!     Rgb([255, 255, 255])
@@ -43,19 +43,20 @@
 //! - `serde`: Enables serialization support (optional)
 
 mod error;
-pub mod imageops_ai;
+mod imageops_ai;
 mod utils;
 
 #[cfg(test)]
 mod test_utils;
 
 pub use error::{AlphaMaskError, ClipBorderError, ConvertColorError, NLMeansError, PaddingError};
-pub use imageops_ai::alpha_premultiply::AlphaPremultiply;
-pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ApplyAlphaMaskConvert};
+pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
+pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ApplyAlphaMaskConvert, ModifyAlpha};
 pub use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
 pub use imageops_ai::nlmeans::NLMeans;
 pub use imageops_ai::padding::{add_padding, Padding, Position};
+pub use utils::{unify_gray_images, unify_rgb_images, LargerType};
 
 // Re-export imageproc::definitions::Image for convenience
 pub use imageproc::definitions::Image;

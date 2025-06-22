@@ -161,7 +161,7 @@ fn test_error_propagation_in_workflow() {
     let wrong_mask: Image<Luma<u8>> = Image::new(5, 5); // Different size
 
     // This should fail due to dimension mismatch
-    let result = image.apply_alpha_mask(&wrong_mask);
+    let result = image.clone().apply_alpha_mask(&wrong_mask);
     assert!(result.is_err());
 
     // Test with zero-sized padding (should fail)

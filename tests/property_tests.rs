@@ -15,6 +15,7 @@ fn image_dimensions() -> impl Strategy<Value = (u32, u32)> {
 }
 
 /// Strategy for generating larger image dimensions for less expensive tests
+#[allow(dead_code)]
 fn larger_image_dimensions() -> impl Strategy<Value = (u32, u32)> {
     (10u32..=50, 10u32..=50)
 }
@@ -65,6 +66,7 @@ fn create_test_rgb_image_with_pattern(
 }
 
 /// Create a test RGBA image with given dimensions and fill pattern
+#[allow(dead_code)]
 fn create_test_rgba_image_with_pattern(
     width: u32,
     height: u32,
@@ -298,8 +300,8 @@ proptest! {
         let image = create_test_rgb_image_with_pattern(orig_width, orig_height, |_, _| Rgb([0, 0, 0]));
 
         if let Ok((_, (pos_x, pos_y))) = image.add_padding((pad_width, pad_height), position, Rgb([255, 255, 255])) {
-            prop_assert!(pos_x + orig_width <= pad_width);
-            prop_assert!(pos_y + orig_height <= pad_height);
+            prop_assert!(pos_x + orig_width as i64 <= pad_width as i64);
+            prop_assert!(pos_y + orig_height as i64 <= pad_height as i64);
         }
     }
 

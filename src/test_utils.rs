@@ -59,6 +59,7 @@ pub fn create_test_rgba_image() -> Image<Rgba<u8>> {
 /// # Returns
 /// A 2x2 Luma image with u8 subpixels
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn create_test_luma_image() -> Image<Luma<u8>> {
     let mut image: Image<Luma<u8>> = Image::new(2, 2);
     image.put_pixel(0, 0, Luma([200]));
@@ -79,6 +80,7 @@ pub fn create_test_luma_image() -> Image<Luma<u8>> {
 /// # Returns
 /// A 2x2 Luma image suitable for use as an alpha mask
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn create_test_alpha_mask() -> Image<Luma<u8>> {
     let mut mask: Image<Luma<u8>> = Image::new(2, 2);
     mask.put_pixel(0, 0, Luma([255]));

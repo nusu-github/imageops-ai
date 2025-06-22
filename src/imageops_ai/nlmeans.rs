@@ -50,6 +50,8 @@ use std::f32;
 pub trait NLMeans<T> {
     /// Apply Non-Local Means denoising to the image
     ///
+    /// This consumes the original image.
+    ///
     /// # Arguments
     ///
     /// * `h` - Filtering parameter (must be positive)
@@ -66,7 +68,34 @@ pub trait NLMeans<T> {
     /// * `NLMeansError::InvalidFilteringParameter` - If h is not positive
     /// * `NLMeansError::InvalidWindowSizes` - If big_window <= small_window
     /// * `NLMeansError::ImageTooSmall` - If image is too small for the specified window sizes
-    fn nl_means(&self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError>
+    fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError>
+    where
+        Self: Sized;
+
+    /// Apply Non-Local Means denoising to the image in-place
+    ///
+    /// # Arguments
+    ///
+    /// * `h` - Filtering parameter (must be positive)
+    /// * `small_window` - Patch size for similarity comparison (must be odd positive integer)
+    /// * `big_window` - Search window size (must be odd and larger than small_window)
+    ///
+    /// # Returns
+    ///
+    /// Returns a mutable reference to the denoised image or an error if the parameters are invalid
+    ///
+    /// # Errors
+    ///
+    /// * `NLMeansError::InvalidWindowSize` - If window sizes are not odd positive integers
+    /// * `NLMeansError::InvalidFilteringParameter` - If h is not positive
+    /// * `NLMeansError::InvalidWindowSizes` - If big_window <= small_window
+    /// * `NLMeansError::ImageTooSmall` - If image is too small for the specified window sizes
+    fn nl_means_mut(
+        &mut self,
+        h: f32,
+        small_window: u32,
+        big_window: u32,
+    ) -> Result<&mut Self, NLMeansError>
     where
         Self: Sized;
 }
@@ -492,7 +521,7 @@ where
     T: Primitive + Into<f32> + Clamp<f32>,
     u8: Into<T>,
 {
-    fn nl_means(&self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
+    fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
 
         // Validate parameters
@@ -500,7 +529,7 @@ where
 
         // Apply reflection padding
         let pad_size = big_window / 2;
-        let (padded_image, padded_width, padded_height) = reflect_pad(self, pad_size);
+        let (padded_image, padded_width, padded_height) = reflect_pad(&self, pad_size);
 
         // Pre-compute normalization factor
         let nw = h * h * (small_window * small_window) as f32;
@@ -570,6 +599,99 @@ where
 
         Ok(result)
     }
+
+    fn nl_means_mut(
+        &mut self,
+        h: f32,
+        small_window: u32,
+        big_window: u32,
+    ) -> Result<&mut Self, NLMeansError> {
+        let (width, height) = self.dimensions();
+
+        // Validate parameters
+        validate_parameters(h, small_window, big_window, width, height)?;
+
+        // Apply reflection padding
+        let pad_size = big_window / 2;
+        let (padded_image, padded_width, padded_height) = reflect_pad(self, pad_size);
+
+        // Pre-compute normalization factor
+        let nw = h * h * (small_window * small_window) as f32;
+
+        // Temporary storage for new values
+        let mut new_values = Vec::with_capacity((width * height) as usize);
+
+        // Process each pixel
+        for y in 0..height {
+            for x in 0..width {
+                let padded_x = x + pad_size;
+                let padded_y = y + pad_size;
+
+                // Extract patch for current pixel
+                let pixel_patch = extract_patch(
+                    &padded_image,
+                    padded_width,
+                    padded_height,
+                    padded_x,
+                    padded_y,
+                    small_window,
+                );
+
+                let mut weighted_sum = 0.0f32;
+                let mut weight_sum = 0.0f32;
+
+                // Search within big_window
+                let half_big = big_window / 2;
+                for ny in (padded_y - half_big)..=(padded_y + half_big) {
+                    for nx in (padded_x - half_big)..=(padded_x + half_big) {
+                        // Extract patch for neighbor pixel
+                        let neighbor_patch = extract_patch(
+                            &padded_image,
+                            padded_width,
+                            padded_height,
+                            nx,
+                            ny,
+                            small_window,
+                        );
+
+                        // Calculate patch distance
+                        let distance = patch_distance(&pixel_patch, &neighbor_patch);
+
+                        // Calculate weight
+                        let weight = f32::exp(-distance / nw);
+
+                        // Get neighbor pixel value
+                        let neighbor_value = padded_image[(ny * padded_width + nx) as usize].into();
+
+                        weighted_sum += weight * neighbor_value;
+                        weight_sum += weight;
+                    }
+                }
+
+                // Calculate new pixel value
+                let new_value = if weight_sum > 0.0 {
+                    weighted_sum / weight_sum
+                } else {
+                    self.get_pixel(x, y).0[0].into()
+                };
+
+                // Clamp to valid range and convert back to T
+                let clamped_value = clamp_f32_to_primitive::<T>(new_value);
+                new_values.push(clamped_value);
+            }
+        }
+
+        // Update the image in-place
+        let mut i = 0;
+        for y in 0..height {
+            for x in 0..width {
+                self.put_pixel(x, y, Luma([new_values[i]]));
+                i += 1;
+            }
+        }
+
+        Ok(self)
+    }
 }
 
 impl<T> NLMeans<T> for Image<Rgb<T>>
@@ -578,7 +700,7 @@ where
     u8: Into<T>,
     Rgb<T>: Pixel<Subpixel = T>,
 {
-    fn nl_means(&self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
+    fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
 
         // Validate parameters
@@ -586,7 +708,7 @@ where
 
         // Apply reflection padding
         let pad_size = big_window / 2;
-        let (padded_image, padded_width, padded_height) = reflect_pad_rgb(self, pad_size);
+        let (padded_image, padded_width, padded_height) = reflect_pad_rgb(&self, pad_size);
 
         // Pre-compute normalization factor
         let nw = h * h * (small_window * small_window * 3) as f32; // 3 channels
@@ -672,6 +794,15 @@ where
 
         Ok(result)
     }
+
+    fn nl_means_mut(
+        &mut self,
+        _h: f32,
+        _small_window: u32,
+        _big_window: u32,
+    ) -> Result<&mut Self, NLMeansError> {
+        unimplemented!("nl_means_mut for RGB images not yet implemented")
+    }
 }
 
 impl<T> NLMeans<T> for Image<Rgba<T>>
@@ -680,7 +811,7 @@ where
     u8: Into<T>,
     Rgba<T>: Pixel<Subpixel = T>,
 {
-    fn nl_means(&self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
+    fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
 
         // Validate parameters
@@ -688,7 +819,7 @@ where
 
         // Apply reflection padding
         let pad_size = big_window / 2;
-        let (padded_image, padded_width, padded_height) = reflect_pad_rgba(self, pad_size);
+        let (padded_image, padded_width, padded_height) = reflect_pad_rgba(&self, pad_size);
 
         // Pre-compute normalization factor
         let nw = h * h * (small_window * small_window * 4) as f32; // 4 channels
@@ -778,6 +909,15 @@ where
         }
 
         Ok(result)
+    }
+
+    fn nl_means_mut(
+        &mut self,
+        _h: f32,
+        _small_window: u32,
+        _big_window: u32,
+    ) -> Result<&mut Self, NLMeansError> {
+        unimplemented!("nl_means_mut for RGBA images not yet implemented")
     }
 }
 

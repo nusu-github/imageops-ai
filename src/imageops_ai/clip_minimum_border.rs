@@ -7,8 +7,13 @@ use imageproc::map::map_colors;
 ///
 /// This trait provides functionality to automatically detect and clip
 /// the minimum boundaries of image content, removing empty borders.
+///
+/// Note: This operation changes the image dimensions, so there is no `_mut` variant
+/// available. The algorithm creates a new image with different dimensions.
 pub trait ClipMinimumBorder<T> {
     /// Clips minimum borders from the image based on content detection
+    ///
+    /// This consumes the original image.
     ///
     /// # Arguments
     /// * `iterations` - Number of clipping iterations to perform
@@ -35,9 +40,22 @@ pub trait ClipMinimumBorder<T> {
     /// # Ok(())
     /// # }
     /// ```
-    fn clip_minimum_border(&self, iterations: usize, threshold: T) -> Result<Self, ClipBorderError>
+    fn clip_minimum_border(self, iterations: usize, threshold: T) -> Result<Self, ClipBorderError>
     where
         Self: Sized;
+
+    /// Hidden _mut variant that is not available for this operation
+    #[doc(hidden)]
+    fn clip_minimum_border_mut(
+        &mut self,
+        _iterations: usize,
+        _threshold: T,
+    ) -> Result<&mut Self, ClipBorderError>
+    where
+        Self: Sized,
+    {
+        unimplemented!("clip_minimum_border_mut is not available because the operation changes image dimensions")
+    }
 }
 
 impl<P, S> ClipMinimumBorder<S> for Image<P>
@@ -45,12 +63,8 @@ where
     P: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
-    fn clip_minimum_border(
-        &self,
-        iterations: usize,
-        threshold: S,
-    ) -> Result<Self, ClipBorderError> {
-        let mut image = self.clone();
+    fn clip_minimum_border(self, iterations: usize, threshold: S) -> Result<Self, ClipBorderError> {
+        let mut image = self;
         for i in 0..iterations {
             let corners = image.extract_corners();
             let background = &corners[i % 4];
