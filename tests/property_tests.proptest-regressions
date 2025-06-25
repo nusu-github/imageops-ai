@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc cc5d6d40b4c626623fb647596043b4db048365dd9efff32d73f95a57a12f97ca # shrinks to (width, height) = (1, 1), (bad_width, bad_height) = (1, 1), position = Top
+cc a8900db33bee86944f0645a13b4a3b4e1f845e19ee560d0e4ac1e52c159113b7 # shrinks to (width, height) = (5, 5), rgb_pixel = Rgb([0, 0, 0]), alpha_pixel = Luma([0]), radius = 3

@@ -1,8 +1,6 @@
 use crate::error::NLMeansError;
-use crate::utils::clamp_f32_to_primitive;
 use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb, Rgba};
 use imageproc::definitions::{Clamp, Image};
-use std::f32;
 
 /// Non-Local Means denoising trait
 ///
@@ -95,9 +93,7 @@ pub trait NLMeans<T> {
         h: f32,
         small_window: u32,
         big_window: u32,
-    ) -> Result<&mut Self, NLMeansError>
-    where
-        Self: Sized;
+    ) -> Result<&mut Self, NLMeansError>;
 }
 
 /// Validation function for Non-Local Means parameters
@@ -154,11 +150,11 @@ fn validate_parameters(
 }
 
 /// Calculate squared Euclidean distance between two patches
-/// Works for both single-channel and multi-channel patches
+/// Works for both single-channel and multichannel patches
 #[inline]
 fn patch_distance<T>(patch1: &[T], patch2: &[T]) -> f32
 where
-    T: Copy + Into<f32>,
+    T: Primitive + Into<f32>,
 {
     patch1
         .iter()
@@ -519,7 +515,6 @@ where
 impl<T> NLMeans<T> for Image<Luma<T>>
 where
     T: Primitive + Into<f32> + Clamp<f32>,
-    u8: Into<T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
@@ -592,7 +587,7 @@ where
                 };
 
                 // Clamp to valid range and convert back to T
-                let clamped_value = clamp_f32_to_primitive::<T>(new_value);
+                let clamped_value = T::clamp(new_value);
                 result.put_pixel(x, y, Luma([clamped_value]));
             }
         }
@@ -676,7 +671,7 @@ where
                 };
 
                 // Clamp to valid range and convert back to T
-                let clamped_value = clamp_f32_to_primitive::<T>(new_value);
+                let clamped_value = T::clamp(new_value);
                 new_values.push(clamped_value);
             }
         }
@@ -697,7 +692,6 @@ where
 impl<T> NLMeans<T> for Image<Rgb<T>>
 where
     T: Primitive + Into<f32> + Clamp<f32>,
-    u8: Into<T>,
     Rgb<T>: Pixel<Subpixel = T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
@@ -785,9 +779,9 @@ where
                 };
 
                 // Clamp to valid range and convert back to T
-                let clamped_r = clamp_f32_to_primitive::<T>(new_values[0]);
-                let clamped_g = clamp_f32_to_primitive::<T>(new_values[1]);
-                let clamped_b = clamp_f32_to_primitive::<T>(new_values[2]);
+                let clamped_r = T::clamp(new_values[0]);
+                let clamped_g = T::clamp(new_values[1]);
+                let clamped_b = T::clamp(new_values[2]);
                 result.put_pixel(x, y, Rgb([clamped_r, clamped_g, clamped_b]));
             }
         }
@@ -808,7 +802,6 @@ where
 impl<T> NLMeans<T> for Image<Rgba<T>>
 where
     T: Primitive + Into<f32> + Clamp<f32>,
-    u8: Into<T>,
     Rgba<T>: Pixel<Subpixel = T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
@@ -900,10 +893,10 @@ where
                 };
 
                 // Clamp to valid range and convert back to T
-                let clamped_r = clamp_f32_to_primitive::<T>(new_values[0]);
-                let clamped_g = clamp_f32_to_primitive::<T>(new_values[1]);
-                let clamped_b = clamp_f32_to_primitive::<T>(new_values[2]);
-                let clamped_a = clamp_f32_to_primitive::<T>(new_values[3]);
+                let clamped_r = T::clamp(new_values[0]);
+                let clamped_g = T::clamp(new_values[1]);
+                let clamped_b = T::clamp(new_values[2]);
+                let clamped_a = T::clamp(new_values[3]);
                 result.put_pixel(x, y, Rgba([clamped_r, clamped_g, clamped_b, clamped_a]));
             }
         }

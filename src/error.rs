@@ -34,6 +34,13 @@ pub enum ConvertColorError {
     /// failed during the conversion process.
     #[error("Failed to create image buffer")]
     BufferCreationFailed,
+
+    /// The input image has zero width or height
+    ///
+    /// This error occurs when an operation receives an empty image
+    /// (width or height is 0).
+    #[error("Image has zero dimensions")]
+    EmptyImage,
 }
 
 /// Error type for alpha mask operations
@@ -154,5 +161,80 @@ pub enum NLMeansError {
         width: u32,
         height: u32,
         big_window: u32,
+    },
+}
+
+/// Error type for Guided Filter operations
+///
+/// This error type represents failures that can occur during
+/// Guided Filter operations.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum GuidedFilterError {
+    /// Invalid radius parameter
+    ///
+    /// This error occurs when the radius is zero or too large.
+    #[error("Invalid radius: {radius}. Radius must be a positive integer")]
+    InvalidRadius { radius: u32 },
+
+    /// Invalid epsilon parameter
+    ///
+    /// This error occurs when epsilon is negative or zero.
+    #[error("Invalid epsilon: {epsilon}. Epsilon must be positive")]
+    InvalidEpsilon { epsilon: f32 },
+
+    /// Invalid scale parameter for fast guided filter
+    ///
+    /// This error occurs when scale is zero or one.
+    #[error("Invalid scale: {scale}. Scale must be greater than 1")]
+    InvalidScale { scale: u32 },
+
+    /// Image dimensions do not match between guidance and input images
+    ///
+    /// This error occurs when the guidance and input images have different dimensions.
+    #[error("Image dimensions mismatch: guidance {guidance_dims:?}, input {input_dims:?}")]
+    DimensionMismatch {
+        guidance_dims: (u32, u32),
+        input_dims: (u32, u32),
+    },
+
+    /// Image is too small for the specified parameters
+    ///
+    /// This error occurs when the image dimensions are insufficient
+    /// for the requested filter parameters.
+    #[error("Image dimensions ({width}x{height}) are too small for radius {radius}")]
+    ImageTooSmall {
+        width: u32,
+        height: u32,
+        radius: u32,
+    },
+}
+
+/// Error type for box filter operations
+///
+/// This error type represents failures that can occur during
+/// box filter operations.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum BoxFilterError {
+    /// Invalid radius parameter
+    ///
+    /// This error occurs when the radius is negative.
+    #[error("Invalid radius: {radius}. Radius must be non-negative")]
+    InvalidRadius { radius: i32 },
+
+    /// Image has zero dimensions
+    ///
+    /// This error occurs when the input image has zero width or height.
+    #[error("Image has zero dimensions ({width}x{height})")]
+    EmptyImage { width: u32, height: u32 },
+
+    /// Image dimensions are too small for the filter radius
+    ///
+    /// This error occurs when the image dimensions are insufficient
+    /// for the requested filter radius.
+    #[error("Image dimensions ({width}x{height}) are too small for radius {radius}")]
+    ImageTooSmall {
+        width: u32,
+        height: u32,
+        radius: u32,
     },
 }

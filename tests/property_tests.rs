@@ -273,12 +273,17 @@ proptest! {
         (width, height) in (5u32..=15, 5u32..=15), // Larger minimum for blur operations
         rgb_pixel in rgb_pixel(),
         alpha_pixel in alpha_pixel(),
-        radius in 1u32..=5 // Small radius for property tests
+        radius in 1u32..=2 // Box filter requires 2*radius+1 <= min(width, height)
     ) {
         let image = create_test_rgb_image_with_pattern(width, height, |_, _| rgb_pixel);
         let mask = create_test_alpha_mask_with_pattern(width, height, |_, _| alpha_pixel);
 
-        let result = image.estimate_foreground(&mask, radius);
+        // Ensure radius is valid for the image size
+        let min_dimension = width.min(height);
+        let max_radius = (min_dimension - 1) / 2;
+        let valid_radius = radius.min(max_radius).max(1);
+
+        let result = image.estimate_foreground(&mask, valid_radius);
         prop_assert!(result.is_ok());
 
         if let Ok(foreground) = result {

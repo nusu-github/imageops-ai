@@ -1,7 +1,6 @@
 use crate::ClipBorderError;
 use image::{GenericImageView, Luma, LumaA, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
-use imageproc::map::map_colors;
 
 /// Trait for clipping minimum borders from images based on content detection
 ///
@@ -87,7 +86,6 @@ trait ImageProcessing<P: Pixel> {
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4];
-    fn create_difference_map(&self, background: &Luma<P::Subpixel>) -> Image<Luma<u8>>;
 }
 
 impl<P: Pixel> ImageProcessing<P> for Image<P>
@@ -112,16 +110,24 @@ where
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4] {
-        // Use map_colors to create a difference image for more efficient processing
-        let diff_image = self.create_difference_map(background);
+        let background_value: f32 = background[0].into();
+        let max_value: f32 = P::Subpixel::DEFAULT_MAX_VALUE.into();
+        let threshold_value: f32 = threshold.into();
 
         let (width, height) = self.dimensions();
         let mut bounds = [width, height, 0, 0]; // [x1, y1, x2, y2]
 
-        for (x, y, pixel) in diff_image.enumerate_pixels() {
-            let pixel_value: f32 = pixel[0].into();
-            let threshold_value: f32 = threshold.into();
-            if pixel_value > threshold_value {
+        // Directly iterate over pixels without creating intermediate difference image
+        for (x, y, pixel) in self.enumerate_pixels() {
+            let pixel_luma = pixel.to_luma_alpha().to_luma();
+            let pixel_value: f32 = pixel_luma[0].into();
+
+            // Calculate difference and check against threshold
+            let normalized_pixel = pixel_value / max_value;
+            let normalized_background = background_value / max_value;
+            let diff = (normalized_pixel - normalized_background).abs() * max_value;
+
+            if diff > threshold_value {
                 update_bounds(&mut bounds, x, y);
             }
         }
@@ -133,30 +139,7 @@ where
             bounds[3].saturating_sub(bounds[1]),
         ]
     }
-
-    fn create_difference_map(&self, background: &Luma<P::Subpixel>) -> Image<Luma<u8>> {
-        let background_value = background[0].into();
-        let max = P::Subpixel::DEFAULT_MAX_VALUE.into();
-        let background_normalized = background_value / max * 255.0;
-        let background_u8 = P::Subpixel::clamp(background_normalized);
-
-        // Use map_colors to efficiently transform all pixels to difference values
-        map_colors(self, |pixel| {
-            let pixel_luma = merge_alpha(pixel.to_luma_alpha());
-            let pixel_value = pixel_luma[0].into();
-            let pixel_normalized = pixel_value / max * 255.0;
-            let pixel_u8 = P::Subpixel::clamp(pixel_normalized);
-
-            // Calculate absolute difference as u8
-            let pixel_val: f32 = pixel_u8.into();
-            let bg_val: f32 = background_u8.into();
-            let diff = P::Subpixel::clamp((pixel_val - bg_val).abs());
-
-            Luma([diff.into() as u8])
-        })
-    }
 }
-
 fn merge_alpha<S>(pixel: LumaA<S>) -> Luma<S>
 where
     S: Primitive + Into<f32> + Clamp<f32>,

@@ -74,6 +74,7 @@
 //! - **Neighborhood radius**: Uses r=90 by default (paper recommended value)
 //! - **Iterative processing**: Blur-Fusion x2 performs 2 iterations (r=90, r=6)
 //! - **Type safety**: Safety and performance through Rust's type system
+//! - **image::imageops integration**: Leverages standard library functions for better performance
 //!
 //! ## Usage Examples
 //!
@@ -146,12 +147,58 @@
 //! [2] Porter, T., & Duff, T. "Compositing digital images."
 //!     ACM SIGGRAPH Computer Graphics, 1984.
 
-use crate::utils::{clamp_f32_to_primitive, validate_matching_dimensions};
+use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterIntegral};
+use crate::utils::validate_matching_dimensions;
 use crate::AlphaMaskError;
-use image::{Luma, Pixel, Primitive, Rgb};
+use image::{GenericImageView, ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
-use imageproc::filter::box_filter;
-use imageproc::map::{blue_channel, green_channel, map_pixels, red_channel};
+
+/// Extract red channel from RGB image as f32
+#[inline]
+fn extract_red_channel_f32<T>(image: &Image<Rgb<T>>) -> Image<Luma<f32>>
+where
+    Rgb<T>: Pixel<Subpixel = T>,
+    T: Into<f32> + Primitive,
+{
+    ImageBuffer::from_fn(image.width(), image.height(), |x, y| {
+        Luma([unsafe { image.unsafe_get_pixel(x, y)[0] }.into()])
+    })
+}
+
+/// Extract green channel from RGB image as f32
+#[inline]
+fn extract_green_channel_f32<T>(image: &Image<Rgb<T>>) -> Image<Luma<f32>>
+where
+    Rgb<T>: Pixel<Subpixel = T>,
+    T: Into<f32> + Primitive,
+{
+    ImageBuffer::from_fn(image.width(), image.height(), |x, y| {
+        Luma([unsafe { image.unsafe_get_pixel(x, y)[1] }.into()])
+    })
+}
+
+/// Extract blue channel from RGB image as f32
+#[inline]
+fn extract_blue_channel_f32<T>(image: &Image<Rgb<T>>) -> Image<Luma<f32>>
+where
+    Rgb<T>: Pixel<Subpixel = T>,
+    T: Into<f32> + Primitive,
+{
+    ImageBuffer::from_fn(image.width(), image.height(), |x, y| {
+        Luma([unsafe { image.unsafe_get_pixel(x, y)[2] }.into()])
+    })
+}
+
+/// Convert alpha channel to f32
+#[inline]
+fn alpha_to_f32<T>(alpha: &Image<Luma<T>>) -> Image<Luma<f32>>
+where
+    T: Into<f32> + Primitive,
+{
+    ImageBuffer::from_fn(alpha.width(), alpha.height(), |x, y| {
+        Luma([unsafe { alpha.unsafe_get_pixel(x, y)[0] }.into()])
+    })
+}
 
 /// Trait for performing Blur-Fusion foreground estimation on RGB images
 ///
@@ -165,7 +212,6 @@ use imageproc::map::{blue_channel, green_channel, map_pixels, red_channel};
 pub trait ForegroundEstimator<S>
 where
     Rgb<S>: Pixel<Subpixel = S>,
-    Luma<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
     /// Performs Blur-Fusion foreground estimation on the image
@@ -199,7 +245,6 @@ where
 impl<S> ForegroundEstimator<S> for Image<Rgb<S>>
 where
     Rgb<S>: Pixel<Subpixel = S>,
-    Luma<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
     fn estimate_foreground(
@@ -256,7 +301,6 @@ pub fn estimate_foreground<T>(
 ) -> Result<Image<Rgb<T>>, AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    Luma<T>: Pixel<Subpixel = T>,
     T: Into<f32> + Clamp<f32> + Primitive,
 {
     validate_inputs(image, alpha, radius, iterations)?;
@@ -296,7 +340,6 @@ fn apply_blur_fusion_step<T>(
 ) -> Result<(), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    Luma<T>: Pixel<Subpixel = T>,
     T: Into<f32> + Clamp<f32> + Primitive,
 {
     // Phase 1: Compute weighted blurred estimates using optimized approach
@@ -304,33 +347,29 @@ where
         compute_optimized_smoothed_estimates(foreground, background, alpha, radius)?;
 
     // Phase 2: Apply final foreground estimation (Equation 7)
-    let (width, height) = image.dimensions();
-    for y in 0..height {
-        for x in 0..width {
-            let i_pixel = *image.get_pixel(x, y);
-            let f_hat_pixel = *f_hat.get_pixel(x, y);
-            let b_hat_pixel = *b_hat.get_pixel(x, y);
-            let alpha_val = alpha.get_pixel(x, y)[0].into();
-            let max_val = T::DEFAULT_MAX_VALUE.into();
+    let max_val = T::DEFAULT_MAX_VALUE.into();
+    for (x, y, f_pixel) in foreground.enumerate_pixels_mut() {
+        unsafe {
+            let i_pixel = image.unsafe_get_pixel(x, y);
+            let f_hat_pixel = f_hat.unsafe_get_pixel(x, y);
+            let b_hat_pixel = b_hat.unsafe_get_pixel(x, y);
+            let alpha_val = alpha.unsafe_get_pixel(x, y)[0].into();
             let normalized_alpha = alpha_val / max_val;
-
-            let final_fg =
+            *f_pixel =
                 compute_final_foreground_pixel(i_pixel, f_hat_pixel, b_hat_pixel, normalized_alpha);
-
-            foreground.put_pixel(x, y, final_fg);
         }
     }
 
     Ok(())
 }
 
-/// Optimized computation of smoothed estimates using box filtering (Equations 4 and 5)
+/// Optimized computation of smoothed estimates using direct f32 box filtering (Equations 4 and 5)
 ///
 /// This function efficiently implements equations 4 and 5 from the paper:
 /// - F̂_i = Σ(F_j * α_j) / Σ(α_j)
 /// - B̂_i = Σ(B_j * (1-α_j)) / Σ(1-α_j)
 ///
-/// Acceleration is achieved through channel separation and box filter optimization.
+/// Acceleration is achieved through direct f32 calculations and optimized channel processing.
 fn compute_optimized_smoothed_estimates<T>(
     foreground: &Image<Rgb<T>>,
     background: &Image<Rgb<T>>,
@@ -339,141 +378,142 @@ fn compute_optimized_smoothed_estimates<T>(
 ) -> Result<(Image<Rgb<T>>, Image<Rgb<T>>), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    Luma<T>: Pixel<Subpixel = T>,
     T: Into<f32> + Clamp<f32> + Primitive,
-    f32: From<u8>,
 {
     let (width, height) = foreground.dimensions();
-
-    // Use imageproc channel separation for more efficient processing
-    let fg_r = red_channel(foreground);
-    let fg_g = green_channel(foreground);
-    let fg_b = blue_channel(foreground);
-
-    let bg_r = red_channel(background);
-    let bg_g = green_channel(background);
-    let bg_b = blue_channel(background);
-
-    // Create weighted images for efficient box filtering (normalized to u8 for box_filter)
-    let mut fg_weighted = [
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-    ];
-    let mut bg_weighted = [
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-    ];
-
     let max_val = T::DEFAULT_MAX_VALUE.into();
 
-    // Pre-compute weighted images using map_pixels for efficiency
-    fg_weighted[0] = map_pixels(&fg_r, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    // Extract channels as f32 for efficient processing
+    let fg_r = extract_red_channel_f32(foreground);
+    let fg_g = extract_green_channel_f32(foreground);
+    let fg_b = extract_blue_channel_f32(foreground);
+
+    let bg_r = extract_red_channel_f32(background);
+    let bg_g = extract_green_channel_f32(background);
+    let bg_b = extract_blue_channel_f32(background);
+
+    let alpha_f32 = alpha_to_f32(alpha);
+
+    // Create weighted images for efficient box filtering (direct f32 calculations)
+    let fg_weighted_r = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { fg_r.unsafe_get_pixel(x, y)[0] };
         let normalized_alpha = alpha_val / max_val;
-        let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_alpha])
     });
 
-    fg_weighted[1] = map_pixels(&fg_g, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    let fg_weighted_g = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { fg_g.unsafe_get_pixel(x, y)[0] };
         let normalized_alpha = alpha_val / max_val;
-        let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_alpha])
     });
 
-    fg_weighted[2] = map_pixels(&fg_b, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    let fg_weighted_b = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { fg_b.unsafe_get_pixel(x, y)[0] };
         let normalized_alpha = alpha_val / max_val;
-        let weighted_val = pixel[0].into() * normalized_alpha;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_alpha])
     });
 
-    bg_weighted[0] = map_pixels(&bg_r, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    let bg_weighted_r = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { bg_r.unsafe_get_pixel(x, y)[0] };
         let normalized_beta = 1.0 - (alpha_val / max_val);
-        let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_beta])
     });
 
-    bg_weighted[1] = map_pixels(&bg_g, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    let bg_weighted_g = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { bg_g.unsafe_get_pixel(x, y)[0] };
         let normalized_beta = 1.0 - (alpha_val / max_val);
-        let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_beta])
     });
 
-    bg_weighted[2] = map_pixels(&bg_b, |x, y, pixel| {
-        let alpha_val = alpha.get_pixel(x, y)[0].into();
+    let bg_weighted_b = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
+        let pixel_val = unsafe { bg_b.unsafe_get_pixel(x, y)[0] };
         let normalized_beta = 1.0 - (alpha_val / max_val);
-        let weighted_val = pixel[0].into() * normalized_beta;
-        Luma([clamp_f32_to_primitive::<u8>(weighted_val * 255.0)])
+        Luma([pixel_val * normalized_beta])
     });
 
-    // Create alpha and beta weight images
-    let alpha_weights: Image<Luma<u8>> = map_pixels(alpha, |_x, _y, pixel| {
-        let alpha_val = pixel[0].into();
+    // Create alpha and beta weight images (direct f32)
+    let alpha_weights = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
         let normalized_alpha = alpha_val / max_val;
-        Luma([clamp_f32_to_primitive::<u8>(normalized_alpha * 255.0)])
+        Luma([normalized_alpha])
     });
 
-    let beta_weights: Image<Luma<u8>> = map_pixels(alpha, |_x, _y, pixel| {
-        let alpha_val = pixel[0].into();
+    let beta_weights = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_val = unsafe { alpha_f32.unsafe_get_pixel(x, y)[0] };
         let normalized_beta = 1.0 - (alpha_val / max_val);
-        Luma([clamp_f32_to_primitive::<u8>(normalized_beta * 255.0)])
+        Luma([normalized_beta])
     });
 
-    // Apply box filter to all weighted images (u8 normalized)
-    let mut fg_blurred = [
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-    ];
-    let mut bg_blurred = [
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-        Image::<Luma<u8>>::new(width, height),
-    ];
+    // Apply box filter to all weighted images using integral image implementation
+    let filter = BoxFilterIntegral::new(radius).unwrap(); // radius already validated
+    let (
+        fg_blurred_r,
+        fg_blurred_g,
+        fg_blurred_b,
+        bg_blurred_r,
+        bg_blurred_g,
+        bg_blurred_b,
+        alpha_weights_blurred,
+        beta_weights_blurred,
+    ) = (
+        filter.filter(&fg_weighted_r).unwrap(),
+        filter.filter(&fg_weighted_g).unwrap(),
+        filter.filter(&fg_weighted_b).unwrap(),
+        filter.filter(&bg_weighted_r).unwrap(),
+        filter.filter(&bg_weighted_g).unwrap(),
+        filter.filter(&bg_weighted_b).unwrap(),
+        filter.filter(&alpha_weights).unwrap(),
+        filter.filter(&beta_weights).unwrap(),
+    );
 
-    for c in 0..3 {
-        fg_blurred[c] = box_filter(&fg_weighted[c], radius, radius);
-        bg_blurred[c] = box_filter(&bg_weighted[c], radius, radius);
-    }
-
-    let alpha_weights_blurred = box_filter(&alpha_weights, radius, radius);
-    let beta_weights_blurred = box_filter(&beta_weights, radius, radius);
-
-    // Reconstruct final averaged images using map_pixels
-    let f_hat = map_pixels(foreground, |x, y, fg_pixel| {
-        let alpha_weight = f32::from(alpha_weights_blurred.get_pixel(x, y)[0]) / 255.0;
+    // Reconstruct final averaged images using direct calculations
+    let f_hat = ImageBuffer::from_fn(width, height, |x, y| {
+        let alpha_weight = unsafe { alpha_weights_blurred.unsafe_get_pixel(x, y)[0] };
+        let orig_pixel = unsafe { foreground.unsafe_get_pixel(x, y) };
 
         let mut fg_channels = [T::DEFAULT_MIN_VALUE; 3];
 
-        for c in 0..3 {
-            if alpha_weight > 0.0 {
-                let fg_sum = f32::from(fg_blurred[c].get_pixel(x, y)[0]) / 255.0;
-                fg_channels[c] = clamp_f32_to_primitive((fg_sum / alpha_weight) * max_val);
-            } else {
-                fg_channels[c] = fg_pixel[c];
-            }
+        if alpha_weight > 0.0 {
+            let fg_sum_r = unsafe { fg_blurred_r.unsafe_get_pixel(x, y)[0] };
+            let fg_sum_g = unsafe { fg_blurred_g.unsafe_get_pixel(x, y)[0] };
+            let fg_sum_b = unsafe { fg_blurred_b.unsafe_get_pixel(x, y)[0] };
+
+            fg_channels[0] = T::clamp((fg_sum_r / alpha_weight) * max_val);
+            fg_channels[1] = T::clamp((fg_sum_g / alpha_weight) * max_val);
+            fg_channels[2] = T::clamp((fg_sum_b / alpha_weight) * max_val);
+        } else {
+            fg_channels[0] = orig_pixel[0];
+            fg_channels[1] = orig_pixel[1];
+            fg_channels[2] = orig_pixel[2];
         }
 
         Rgb(fg_channels)
     });
 
-    let b_hat = map_pixels(background, |x, y, bg_pixel| {
-        let beta_weight = f32::from(beta_weights_blurred.get_pixel(x, y)[0]) / 255.0;
+    let b_hat = ImageBuffer::from_fn(width, height, |x, y| {
+        let beta_weight = unsafe { beta_weights_blurred.unsafe_get_pixel(x, y)[0] };
+        let orig_pixel = unsafe { background.unsafe_get_pixel(x, y) };
 
         let mut bg_channels = [T::DEFAULT_MIN_VALUE; 3];
 
-        for c in 0..3 {
-            if beta_weight > 0.0 {
-                let bg_sum = f32::from(bg_blurred[c].get_pixel(x, y)[0]) / 255.0;
-                bg_channels[c] = clamp_f32_to_primitive((bg_sum / beta_weight) * max_val);
-            } else {
-                bg_channels[c] = bg_pixel[c];
-            }
+        if beta_weight > 0.0 {
+            let bg_sum_r = unsafe { bg_blurred_r.unsafe_get_pixel(x, y)[0] };
+            let bg_sum_g = unsafe { bg_blurred_g.unsafe_get_pixel(x, y)[0] };
+            let bg_sum_b = unsafe { bg_blurred_b.unsafe_get_pixel(x, y)[0] };
+
+            bg_channels[0] = T::clamp((bg_sum_r / beta_weight) * max_val);
+            bg_channels[1] = T::clamp((bg_sum_g / beta_weight) * max_val);
+            bg_channels[2] = T::clamp((bg_sum_b / beta_weight) * max_val);
+        } else {
+            bg_channels[0] = orig_pixel[0];
+            bg_channels[1] = orig_pixel[1];
+            bg_channels[2] = orig_pixel[2];
         }
 
         Rgb(bg_channels)
@@ -503,7 +543,7 @@ where
         let correction = beta.mul_add(-b_hat_c, alpha.mul_add(-f_hat_c, i_c));
         let final_val = alpha.mul_add(correction, f_hat_c);
 
-        result[c] = clamp_f32_to_primitive(final_val);
+        result[c] = T::clamp(final_val);
     }
 
     Rgb(result)
@@ -523,7 +563,6 @@ fn validate_inputs<T>(
 ) -> Result<(), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    Luma<T>: Pixel<Subpixel = T>,
     T: Primitive,
 {
     let (img_w, img_h) = image.dimensions();
@@ -542,6 +581,15 @@ where
         ));
     }
 
+    // Check if image is large enough for box filter with given radius
+    let min_dimension_required = 2 * radius + 1;
+    let min_dimension = img_w.min(img_h);
+    if min_dimension < min_dimension_required {
+        return Err(AlphaMaskError::InvalidParameter(
+            format!("Image dimensions ({img_w}x{img_h}) are too small for radius {radius}. Minimum required: {min_dimension_required}x{min_dimension_required}")
+        ));
+    }
+
     if iterations == 0 || iterations > 2 {
         return Err(AlphaMaskError::InvalidParameter(
             "iterations must be 1 or 2".to_string(),
@@ -557,8 +605,9 @@ mod tests {
 
     #[test]
     fn test_validate_inputs() {
-        let image: Image<Rgb<u8>> = Image::new(10, 10);
-        let alpha: Image<Luma<u8>> = Image::new(10, 10);
+        // Use 12x12 image for radius 5 (needs at least 11x11)
+        let image: Image<Rgb<u8>> = Image::new(12, 12);
+        let alpha: Image<Luma<u8>> = Image::new(12, 12);
 
         assert!(validate_inputs(&image, &alpha, 5, 1).is_ok());
 
@@ -568,5 +617,72 @@ mod tests {
         assert!(validate_inputs(&image, &alpha, 0, 1).is_err());
         assert!(validate_inputs(&image, &alpha, 5, 0).is_err());
         assert!(validate_inputs(&image, &alpha, 5, 3).is_err());
+
+        // Test image too small for radius
+        let small_image: Image<Rgb<u8>> = Image::new(3, 3);
+        let small_alpha: Image<Luma<u8>> = Image::new(3, 3);
+        assert!(validate_inputs(&small_image, &small_alpha, 5, 1).is_err());
+    }
+
+    #[test]
+    fn test_box_filter_integration() {
+        // 基本的なテスト: 均一な画像
+        let image = ImageBuffer::from_fn(5, 5, |_, _| Luma([1.0f32]));
+        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filtered = filter.filter(&image).unwrap();
+        assert_eq!(filtered.get_pixel(2, 2)[0], 1.0);
+
+        // 境界でのテスト: 左上角
+        assert_eq!(filtered.get_pixel(0, 0)[0], 1.0);
+
+        // 境界でのテスト: 右下角
+        assert_eq!(filtered.get_pixel(4, 4)[0], 1.0);
+
+        // より複雑なテスト: 中央に異なる値
+        let mut test_image = ImageBuffer::from_fn(5, 5, |_, _| Luma([1.0f32]));
+        test_image.put_pixel(2, 2, Luma([5.0f32]));
+
+        let filtered_complex = filter.filter(&test_image).unwrap();
+
+        // 中央のピクセルは周囲8個（値1.0）と自分（値5.0）の平均
+        // (8 * 1.0 + 1 * 5.0) / 9 = 13.0 / 9 ≈ 1.444
+        let expected_center = 8.0f32.mul_add(1.0, 1.0 * 5.0) / 9.0;
+        assert!((filtered_complex.get_pixel(2, 2)[0] - expected_center).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_channel_extraction() {
+        let image = ImageBuffer::from_fn(3, 3, |x, y| Rgb([x as u8, y as u8, (x + y) as u8]));
+
+        let red = extract_red_channel_f32(&image);
+        let green = extract_green_channel_f32(&image);
+        let blue = extract_blue_channel_f32(&image);
+
+        assert_eq!(red.get_pixel(1, 0)[0], 1.0);
+        assert_eq!(green.get_pixel(0, 1)[0], 1.0);
+        assert_eq!(blue.get_pixel(1, 1)[0], 2.0);
+    }
+
+    #[test]
+    fn test_box_filter_integration_basic() {
+        // 基本的なテスト: 均一な画像でのIntegral実装
+        let image = ImageBuffer::from_fn(7, 7, |_, _| Luma([2.0f32]));
+
+        let integral_filter = BoxFilterIntegral::new(2).unwrap();
+        let integral_result = integral_filter.filter(&image).unwrap();
+
+        // 均一な画像では全てのピクセルが同じ値になるべき
+        for y in 0..7 {
+            for x in 0..7 {
+                let integral_val = integral_result.get_pixel(x, y)[0];
+                assert!(
+                    (integral_val - 2.0).abs() < 0.001,
+                    "Uniform image test failed at ({}, {}): expected=2.0, actual={}",
+                    x,
+                    y,
+                    integral_val
+                );
+            }
+        }
     }
 }

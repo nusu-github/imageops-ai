@@ -1,6 +1,6 @@
 use crate::error::ConvertColorError;
-use crate::utils::{clamp_f32_to_primitive, normalize_alpha_with_max, validate_non_empty_image};
-use image::{Luma, LumaA, Pixel, Primitive, Rgb, Rgba};
+use crate::utils::normalize_alpha_with_max;
+use image::{GenericImage, Luma, LumaA, Pixel, Primitive, Rgb, Rgba};
 use imageproc::definitions::{Clamp, Image};
 use imageproc::map::map_colors;
 
@@ -109,8 +109,6 @@ pub trait PremultiplyAlphaInPlace {
 /// Safe implementation for LumaA -> Luma conversion with alpha premultiplication
 impl<S> AlphaPremultiply for Image<LumaA<S>>
 where
-    LumaA<S>: Pixel<Subpixel = S>,
-    Luma<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
     type Output = Image<Luma<S>>;
@@ -127,7 +125,7 @@ where
 
             // Apply premultiplication with proper clamping
             let merged_f32 = luminance_f32 * alpha_normalized;
-            let merged = clamp_f32_to_primitive(merged_f32);
+            let merged = S::clamp(merged_f32);
 
             Luma([merged])
         }))
@@ -161,7 +159,6 @@ where
 /// Implementation for LumaA images to premultiply while keeping alpha
 impl<S> PremultiplyAlphaInPlace for Image<LumaA<S>>
 where
-    LumaA<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
     fn premultiply_alpha_keep(self) -> Result<Self, ConvertColorError> {
@@ -176,7 +173,7 @@ where
 
             // Apply premultiplication with proper clamping
             let merged_f32 = luminance_f32 * alpha_normalized;
-            let merged = clamp_f32_to_primitive(merged_f32);
+            let merged = S::clamp(merged_f32);
 
             LumaA([merged, alpha])
         }))
@@ -186,21 +183,18 @@ where
         validate_image_dimensions(self)?;
 
         let max_value = S::DEFAULT_MAX_VALUE.into();
-        let (width, height) = self.dimensions();
 
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = self.get_pixel_mut(x, y);
-                let LumaA([luminance, alpha]) = *pixel;
-                let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
-                let luminance_f32 = luminance.into();
+        // Use iterator for better performance and readability
+        self.pixels_mut().for_each(|pixel| {
+            let LumaA([luminance, alpha]) = *pixel;
+            let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
+            let luminance_f32 = luminance.into();
 
-                let merged_f32 = luminance_f32 * alpha_normalized;
-                let merged = clamp_f32_to_primitive(merged_f32);
+            let merged_f32 = luminance_f32 * alpha_normalized;
+            let merged = S::clamp(merged_f32);
 
-                *pixel = LumaA([merged, alpha]);
-            }
-        }
+            *pixel = LumaA([merged, alpha]);
+        });
 
         Ok(self)
     }
@@ -234,21 +228,18 @@ where
         validate_image_dimensions(self)?;
 
         let max_value = S::DEFAULT_MAX_VALUE.into();
-        let (width, height) = self.dimensions();
 
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = self.get_pixel_mut(x, y);
-                let Rgba([red, green, blue, alpha]) = *pixel;
-                let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
+        // Use iterator for better performance and readability
+        self.pixels_mut().for_each(|pixel| {
+            let Rgba([red, green, blue, alpha]) = *pixel;
+            let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
 
-                let premultiplied =
-                    compute_premultiplied_rgb_pixel([red, green, blue], alpha_normalized);
-                let Rgb([r_pre, g_pre, b_pre]) = premultiplied;
+            let premultiplied =
+                compute_premultiplied_rgb_pixel([red, green, blue], alpha_normalized);
+            let Rgb([r_pre, g_pre, b_pre]) = premultiplied;
 
-                *pixel = Rgba([r_pre, g_pre, b_pre, alpha]);
-            }
-        }
+            *pixel = Rgba([r_pre, g_pre, b_pre, alpha]);
+        });
 
         Ok(self)
     }
@@ -258,33 +249,30 @@ where
 #[inline]
 fn compute_premultiplied_rgb_pixel<S>(channels: [S; 3], alpha_normalized: f32) -> Rgb<S>
 where
-    S: Into<f32> + Primitive + Clamp<f32>,
+    S: Into<f32> + Clamp<f32> + Primitive,
 {
-    let mut result = [S::DEFAULT_MIN_VALUE; 3];
-
-    for (i, &channel) in channels.iter().enumerate() {
+    // Use array::map for more idiomatic and potentially faster code
+    let result = channels.map(|channel| {
         let channel_f32 = channel.into() * alpha_normalized;
-        result[i] = clamp_f32_to_primitive(channel_f32);
-    }
+        S::clamp(channel_f32)
+    });
 
     Rgb(result)
 }
 
 /// Validates image dimensions for processing
-fn validate_image_dimensions<P>(image: &Image<P>) -> Result<(), ConvertColorError>
+fn validate_image_dimensions<I, P>(image: &I) -> Result<(), ConvertColorError>
 where
+    I: GenericImage<Pixel = P>,
     P: Pixel,
 {
     let (width, height) = image.dimensions();
 
-    validate_non_empty_image(width, height, "AlphaPremultiply").map_err(|_| {
-        ConvertColorError::DimensionMismatch {
-            expected_width: 1,
-            expected_height: 1,
-            actual_width: width,
-            actual_height: height,
-        }
-    })
+    if width == 0 || height == 0 {
+        Err(ConvertColorError::EmptyImage)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

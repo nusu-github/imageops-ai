@@ -1,7 +1,7 @@
 use crate::error::AlphaMaskError;
-use crate::utils::{clamp_f32_to_primitive, validate_matching_dimensions};
+use crate::utils::validate_matching_dimensions;
 use image::{Luma, Pixel, Primitive, Rgb, Rgba};
-use imageproc::definitions::{Clamp, Image};
+use imageproc::definitions::Image;
 use imageproc::map::map_colors2;
 
 /// Trait providing functionality to apply alpha masks to images
@@ -122,56 +122,7 @@ where
     /// # Ok(())
     /// # }
     /// ```
-    fn replace_alpha_mut(&mut self, mask: &Image<Luma<S>>) -> Result<&mut Self, AlphaMaskError>
-    where
-        Self: Sized;
-}
-
-/// Trait providing functionality to apply alpha masks to images (with type conversion support)
-///
-/// This trait provides functionality to apply grayscale masks to RGB images
-/// to generate RGBA images.
-/// Use this when the mask and image have different types.
-pub trait ApplyAlphaMaskConvert<S>
-where
-    Rgba<S>: Pixel<Subpixel = S>,
-    S: Primitive,
-{
-    /// Applies the specified mask to the image and generates an image with alpha channel
-    ///
-    /// This consumes the original image.
-    ///
-    /// # Arguments
-    ///
-    /// * `mask` - The alpha mask to apply (grayscale image)
-    ///
-    /// # Returns
-    ///
-    /// RGBA image with added alpha channel
-    ///
-    /// # Errors
-    ///
-    /// * `Error::DimensionMismatch` - When image and mask dimensions don't match
-    /// * `Error::ImageBufferCreationFailed` - When result image creation fails
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use imageops_ai::{Image, ApplyAlphaMaskConvert};
-    /// use image::{ImageBuffer, Rgb, Luma};
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// // RGB image and mask must have the same dimensions
-    /// let rgb_image: Image<Rgb<u8>> = ImageBuffer::new(10, 10);
-    /// let mask: Image<Luma<u16>> = ImageBuffer::new(10, 10);
-    ///
-    /// let rgba_image = rgb_image.apply_alpha_mask(&mask)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    fn apply_alpha_mask<SM>(self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, AlphaMaskError>
-    where
-        SM: Into<f32> + Primitive;
+    fn replace_alpha_mut(&mut self, mask: &Image<Luma<S>>) -> Result<&mut Self, AlphaMaskError>;
 }
 
 impl<S> ApplyAlphaMask<S> for Image<Rgb<S>>
@@ -188,34 +139,6 @@ where
         });
 
         Ok(result)
-    }
-}
-
-impl<S> ApplyAlphaMaskConvert<S> for Image<Rgb<S>>
-where
-    Rgb<S>: Pixel<Subpixel = S>,
-    Rgba<S>: Pixel<Subpixel = S>,
-    S: Into<f32> + Clamp<f32> + Primitive,
-{
-    fn apply_alpha_mask<SM>(self, mask: &Image<Luma<SM>>) -> Result<Image<Rgba<S>>, AlphaMaskError>
-    where
-        SM: Into<f32> + Primitive,
-    {
-        validate_dimensions(&self, mask)?;
-
-        let source_max = S::DEFAULT_MAX_VALUE.into();
-        let mask_max = SM::DEFAULT_MAX_VALUE.into();
-
-        Ok(map_colors2(
-            &self,
-            mask,
-            |Rgb([red, green, blue]), Luma([alpha_value])| {
-                // Alpha value scaling and clamping
-                let scaled_alpha = (alpha_value.into() / mask_max) * source_max;
-                let alpha = clamp_f32_to_primitive(scaled_alpha);
-                Rgba([red, green, blue, alpha])
-            },
-        ))
     }
 }
 
@@ -237,15 +160,12 @@ where
     fn replace_alpha_mut(&mut self, mask: &Image<Luma<S>>) -> Result<&mut Self, AlphaMaskError> {
         validate_dimensions(self, mask)?;
 
-        let (width, height) = self.dimensions();
-
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = self.get_pixel_mut(x, y);
-                let alpha = mask.get_pixel(x, y)[0];
-                pixel[3] = alpha;
-            }
-        }
+        self.pixels_mut()
+            .zip(mask.pixels())
+            .for_each(|(pixel, Luma([alpha]))| {
+                let Rgba([red, green, blue, _]) = *pixel;
+                *pixel = Rgba([red, green, blue, *alpha]);
+            });
 
         Ok(self)
     }
