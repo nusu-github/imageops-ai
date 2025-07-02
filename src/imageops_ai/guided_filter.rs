@@ -58,8 +58,7 @@ impl GuidedFilterWithColorGuidance for Image<Luma<u8>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<Image<Luma<u8>>, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions_mixed(&self, guidance)?;
+        validate_filter_input(&self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterColor::new(guidance, radius, epsilon);
         let result_f32 = filter.filter(&self);
@@ -72,8 +71,7 @@ impl GuidedFilterWithColorGuidance for Image<Luma<u8>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<&mut Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions_mixed(self, guidance)?;
+        validate_filter_input(self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterColor::new(guidance, radius, epsilon);
         let result_f32 = filter.filter(self);
@@ -89,9 +87,7 @@ impl GuidedFilterWithColorGuidance for Image<Luma<u8>> {
         epsilon: f32,
         scale: u32,
     ) -> Result<Image<Luma<u8>>, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_scale(scale)?;
-        validate_dimensions_mixed(&self, guidance)?;
+        validate_fast_filter_input(&self, guidance, radius, epsilon, scale)?;
 
         let filter = FastGuidedFilterImpl::new_color(guidance, radius, epsilon, scale);
         let result_f32 = filter.filter(&self);
@@ -106,8 +102,7 @@ impl GuidedFilterExtension<Luma<u8>> for Image<Luma<u8>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions(&self, guidance)?;
+        validate_filter_input(&self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterGray::new(guidance, radius, epsilon);
         let result_f32 = filter.filter(&self);
@@ -120,8 +115,7 @@ impl GuidedFilterExtension<Luma<u8>> for Image<Luma<u8>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<&mut Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions(self, guidance)?;
+        validate_filter_input(self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterGray::new(guidance, radius, epsilon);
         let result_f32 = filter.filter(self);
@@ -137,9 +131,7 @@ impl GuidedFilterExtension<Luma<u8>> for Image<Luma<u8>> {
         epsilon: f32,
         scale: u32,
     ) -> Result<Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_scale(scale)?;
-        validate_dimensions(&self, guidance)?;
+        validate_fast_filter_input(&self, guidance, radius, epsilon, scale)?;
 
         let filter = FastGuidedFilterImpl::new_gray(guidance, radius, epsilon, scale);
         let result_f32 = filter.filter(&self);
@@ -154,8 +146,7 @@ impl GuidedFilterExtension<Luma<f32>> for Image<Luma<f32>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions(&self, guidance)?;
+        validate_filter_input(&self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterGray::new(guidance, radius, epsilon);
         Ok(filter.filter(&self))
@@ -167,8 +158,7 @@ impl GuidedFilterExtension<Luma<f32>> for Image<Luma<f32>> {
         radius: u32,
         epsilon: f32,
     ) -> Result<&mut Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_dimensions(self, guidance)?;
+        validate_filter_input(self, guidance, radius, epsilon)?;
 
         let filter = GuidedFilterGray::new(guidance, radius, epsilon);
         let result = filter.filter(self);
@@ -183,9 +173,7 @@ impl GuidedFilterExtension<Luma<f32>> for Image<Luma<f32>> {
         epsilon: f32,
         scale: u32,
     ) -> Result<Self, GuidedFilterError> {
-        validate_guided_filter_params(radius, epsilon)?;
-        validate_scale(scale)?;
-        validate_dimensions(&self, guidance)?;
+        validate_fast_filter_input(&self, guidance, radius, epsilon, scale)?;
 
         let filter = FastGuidedFilterImpl::new_gray(guidance, radius, epsilon, scale);
         Ok(filter.filter(&self))
@@ -229,15 +217,38 @@ where
     Ok(())
 }
 
-fn validate_dimensions_mixed<P1, P2>(
+// Removed validate_dimensions_mixed - was just calling validate_dimensions
+
+fn validate_filter_input<P1, P2>(
     input: &Image<P1>,
     guidance: &Image<P2>,
+    radius: u32,
+    epsilon: f32,
 ) -> Result<(), GuidedFilterError>
 where
     P1: Pixel,
     P2: Pixel,
 {
-    validate_dimensions(input, guidance)
+    validate_guided_filter_params(radius, epsilon)?;
+    validate_dimensions(input, guidance)?;
+    Ok(())
+}
+
+fn validate_fast_filter_input<P1, P2>(
+    input: &Image<P1>,
+    guidance: &Image<P2>,
+    radius: u32,
+    epsilon: f32,
+    scale: u32,
+) -> Result<(), GuidedFilterError>
+where
+    P1: Pixel,
+    P2: Pixel,
+{
+    validate_guided_filter_params(radius, epsilon)?;
+    validate_scale(scale)?;
+    validate_dimensions(input, guidance)?;
+    Ok(())
 }
 
 fn convert_f32_to_u8_luma(image: &Image<Luma<f32>>) -> Image<Luma<u8>> {
@@ -404,6 +415,13 @@ pub struct FastGuidedFilterImpl {
 }
 
 impl FastGuidedFilterImpl {
+    // Common helper for initialization parameters
+    fn compute_scale_params(width: u32, height: u32, scale: u32, radius: u32) -> (u32, u32, u32) {
+        let new_width = width / scale;
+        let new_height = height / scale;
+        let scaled_radius = (radius as f32 / scale as f32).max(1.0) as u32;
+        (new_width, new_height, scaled_radius)
+    }
     pub fn new_gray<T>(guidance: &Image<Luma<T>>, radius: u32, epsilon: f32, scale: u32) -> Self
     where
         T: Primitive + Into<f32>,
@@ -411,12 +429,10 @@ impl FastGuidedFilterImpl {
     {
         let guidance_f32 = to_f32_luma(guidance);
         let (width, height) = guidance_f32.dimensions();
-        let new_width = width / scale;
-        let new_height = height / scale;
+        let (new_width, new_height, scaled_radius) = Self::compute_scale_params(width, height, scale, radius);
 
         // ダウンサンプリング用のリサイズ関数を作成
         let guidance_sub = resize_image(&guidance_f32, new_width, new_height);
-        let scaled_radius = (radius as f32 / scale as f32).max(1.0) as u32;
 
         // Compute mean
         let guidance_mean = box_filter(&guidance_sub, scaled_radius);
@@ -471,11 +487,9 @@ impl FastGuidedFilterImpl {
     {
         let guidance_f32_full = to_f32_rgb(guidance);
         let (width, height) = guidance_f32_full.dimensions();
-        let new_width = width / scale;
-        let new_height = height / scale;
+        let (new_width, new_height, scaled_radius) = Self::compute_scale_params(width, height, scale, radius);
 
         let guidance_sub = resize_image(&guidance_f32_full, new_width, new_height);
-        let scaled_radius = (radius as f32 / scale as f32).max(1.0) as u32;
         // Create color filter directly with f32 data
         // Color filter initialization is done inside the struct initialization
         let (new_width, new_height) = guidance_sub.dimensions();

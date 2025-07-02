@@ -333,10 +333,12 @@ where
         filter.filter(&self)
     }
 
-    fn box_filter_integral_mut(&mut self, radius: u32) -> Result<&mut Self, BoxFilterError> {
-        let filter = BoxFilterIntegral::new(radius)?;
-        *self = filter.filter(self)?;
-        Ok(self)
+    /// Hidden _mut variant that is not available for this operation
+    #[doc(hidden)]
+    fn box_filter_integral_mut(&mut self, _radius: u32) -> Result<&mut Self, BoxFilterError> {
+        unimplemented!(
+            "box_filter_integral_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
+        )
     }
 
     fn box_filter_opsat(self, radius: u32) -> Result<Self, BoxFilterError> {
@@ -344,10 +346,12 @@ where
         filter.filter(&self)
     }
 
-    fn box_filter_opsat_mut(&mut self, radius: u32) -> Result<&mut Self, BoxFilterError> {
-        let filter = BoxFilterOPSAT::new(radius)?;
-        *self = filter.filter(self)?;
-        Ok(self)
+    /// Hidden _mut variant that is not available for this operation
+    #[doc(hidden)]
+    fn box_filter_opsat_mut(&mut self, _radius: u32) -> Result<&mut Self, BoxFilterError> {
+        unimplemented!(
+            "box_filter_opsat_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
+        )
     }
 }
 
