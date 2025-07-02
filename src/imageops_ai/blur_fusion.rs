@@ -358,10 +358,14 @@ where
         let Rgb([fg_r, fg_g, fg_b]) = *fg_pixel;
         let Rgb([bg_r, bg_g, bg_b]) = *bg_pixel;
         let Luma([alpha]) = *alpha_beta_pixel;
-        let beta = T::DEFAULT_MAX_VALUE - alpha;
-        *fg_weighted_pixel = Rgb([fg_r * alpha, fg_g * alpha, fg_b * alpha]);
-        *bg_weighted_pixel = Rgb([bg_r * beta, bg_g * beta, bg_b * beta]);
-        *alpha_beta_weighted_pixel = LumaA([alpha, beta]);
+        let beta = (T::DEFAULT_MAX_VALUE - alpha).into();
+        *fg_weighted_pixel = Rgb([
+            fg_r.into() * alpha.into(),
+            fg_g.into() * alpha.into(),
+            fg_b.into() * alpha.into(),
+        ]);
+        *bg_weighted_pixel = Rgb([bg_r.into() * beta, bg_g.into() * beta, bg_b.into() * beta]);
+        *alpha_beta_weighted_pixel = LumaA([alpha.into(), beta]);
     }
 
     // Apply box filter to all weighted images using integral image implementation
@@ -395,25 +399,25 @@ where
     ) {
         let LumaA([alpha_weight, beta_weight]) = *alpha_beta_weights_blurred_pixel;
 
-        if alpha_weight > T::DEFAULT_MIN_VALUE {
-            let inv_alpha_weight = T::DEFAULT_MAX_VALUE / alpha_weight;
+        if alpha_weight > 0.0 {
+            let inv_alpha_weight = 1.0 / alpha_weight;
             let Rgb([fg_sum_r, fg_sum_g, fg_sum_b]) = *fg_blurred_pixel;
             *f_hat_pixel = Rgb([
-                fg_sum_r * inv_alpha_weight,
-                fg_sum_g * inv_alpha_weight,
-                fg_sum_b * inv_alpha_weight,
+                Clamp::clamp(fg_sum_r * inv_alpha_weight),
+                Clamp::clamp(fg_sum_g * inv_alpha_weight),
+                Clamp::clamp(fg_sum_b * inv_alpha_weight),
             ]);
         } else {
             *f_hat_pixel = *fg_pixel;
         }
 
-        if beta_weight > T::DEFAULT_MIN_VALUE {
-            let inv_beta_weight = T::DEFAULT_MAX_VALUE / beta_weight;
+        if beta_weight > 0.0 {
+            let inv_beta_weight = 1.0 / beta_weight;
             let Rgb([bg_sum_r, bg_sum_g, bg_sum_b]) = *bg_blurred_pixel;
             *b_hat_pixel = Rgb([
-                bg_sum_r * inv_beta_weight,
-                bg_sum_g * inv_beta_weight,
-                bg_sum_b * inv_beta_weight,
+                Clamp::clamp(bg_sum_r * inv_beta_weight),
+                Clamp::clamp(bg_sum_g * inv_beta_weight),
+                Clamp::clamp(bg_sum_b * inv_beta_weight),
             ]);
         } else {
             *b_hat_pixel = *bg_pixel;
