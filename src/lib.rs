@@ -10,11 +10,12 @@
 //! - **Boundary Clipping**: Automatic detection and clipping of minimum boundaries
 //! - **Padding**: Smart padding at various positions
 //! - **Box Filtering**: High-performance box filtering with integral image and OP-SAT algorithms
+//! - **One-Sided Box Filter**: Edge-preserving smoothing filter for image denoising
 //!
 //! ## Example Usage
 //!
 //! ```no_run
-//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, Padding, BoxFilterExt};
+//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, Padding, BoxFilterExt, OSBFilterExt};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Rgba, Luma};
 //!
@@ -31,6 +32,10 @@
 //! // Box filtering with method chaining
 //! let image: Image<Rgb<u8>> = Image::new(100, 100);
 //! let filtered = image.box_filter_integral(3)?;
+//!
+//! // One-Sided Box Filter for edge-preserving smoothing
+//! let image: Image<Rgb<u8>> = Image::new(100, 100);
+//! let smoothed = image.osbf(2, 5)?; // radius=2, iterations=5
 //!
 //! // Image padding
 //! let image: Image<Rgb<u8>> = Image::new(50, 50);
@@ -56,7 +61,7 @@ mod test_utils;
 
 pub use error::{
     AlphaMaskError, BoxFilterError, ClipBorderError, ConvertColorError, GuidedFilterError,
-    NLMeansError, PaddingError,
+    NLMeansError, OSBFilterError, PaddingError,
 };
 pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ModifyAlpha};
@@ -68,6 +73,7 @@ pub use imageops_ai::guided_filter::{
     GuidedFilterWithColorGuidance,
 };
 pub use imageops_ai::nlmeans::NLMeans;
+pub use imageops_ai::osbf::{OSBFilter, OSBFilterExt, OneSidedBoxFilter};
 pub use imageops_ai::padding::{add_padding, Padding, Position};
 pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 

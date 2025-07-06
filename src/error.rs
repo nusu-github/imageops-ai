@@ -238,3 +238,39 @@ pub enum BoxFilterError {
         radius: u32,
     },
 }
+
+/// Error type for One-Sided Box Filter operations
+///
+/// This error type represents failures that can occur during
+/// One-Sided Box Filter operations.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum OSBFilterError {
+    /// Invalid radius parameter
+    ///
+    /// This error occurs when the radius is zero or negative.
+    #[error("Invalid radius: {radius}. Radius must be positive")]
+    InvalidRadius { radius: u32 },
+
+    /// Image has zero dimensions
+    ///
+    /// This error occurs when the input image has zero width or height.
+    #[error("Image has zero dimensions ({width}x{height})")]
+    EmptyImage { width: u32, height: u32 },
+
+    /// Image dimensions are too small for the filter radius
+    ///
+    /// This error occurs when the image dimensions are insufficient
+    /// for the requested filter radius.
+    #[error("Image dimensions ({width}x{height}) are too small for radius {radius}")]
+    ImageTooSmall {
+        width: u32,
+        height: u32,
+        radius: u32,
+    },
+
+    /// Invalid iterations parameter
+    ///
+    /// This error occurs when iterations is zero.
+    #[error("Invalid iterations: {iterations}. Iterations must be positive")]
+    InvalidIterations { iterations: u32 },
+}
