@@ -132,6 +132,7 @@ where
 
         // Create output image with optimized indexing
         let kernel_area = (self.kernel_size() * self.kernel_size()) as f32;
+        let inv_kernel_area = 1.0 / kernel_area; // Pre-compute reciprocal for multiplication
 
         let output = ImageBuffer::from_fn(width, height, |x, y| {
             // Convert to padded coordinates
@@ -144,25 +145,29 @@ where
             let x1 = px - self.radius;
             let x2 = px + self.radius + 1;
 
-            let mut pixel_data: Vec<P::Subpixel> = Vec::with_capacity(channels);
+            // Use fixed-size array instead of Vec for better performance
+            let mut pixel_data = [P::Subpixel::DEFAULT_MIN_VALUE; 4];
 
             for c in 0..channels {
-                // Use flat indexing for better cache performance
+                // Use flat indexing for better cache performance with unsafe for bounds-checked removal
                 let y2_idx = (y2 as usize) * integral_width + (x2 as usize);
                 let y1_idx = (y1 as usize) * integral_width + (x2 as usize);
                 let y2_x1_idx = (y2 as usize) * integral_width + (x1 as usize);
                 let y1_x1_idx = (y1 as usize) * integral_width + (x1 as usize);
 
-                let box_sum = channel_integrals[c][y2_idx]
-                    - channel_integrals[c][y1_idx]
-                    - channel_integrals[c][y2_x1_idx]
-                    + channel_integrals[c][y1_x1_idx];
+                // SAFETY: Indices are guaranteed to be within bounds due to padding calculation
+                let box_sum = unsafe {
+                    *channel_integrals[c].get_unchecked(y2_idx)
+                        - *channel_integrals[c].get_unchecked(y1_idx)
+                        - *channel_integrals[c].get_unchecked(y2_x1_idx)
+                        + *channel_integrals[c].get_unchecked(y1_x1_idx)
+                };
 
-                let filtered_value = P::Subpixel::clamp(box_sum / kernel_area);
-                pixel_data.push(filtered_value);
+                let filtered_value = P::Subpixel::clamp(box_sum * inv_kernel_area);
+                pixel_data[c] = filtered_value;
             }
 
-            *P::from_slice(&pixel_data)
+            *P::from_slice(&pixel_data[..channels])
         });
 
         Ok(output)
@@ -221,7 +226,8 @@ where
 
         // Create output image
         let mut output = ImageBuffer::new(width, height);
-        let normalization = 1.0 / (self.kernel_size() * self.kernel_size()) as f32;
+        let kernel_area = (self.kernel_size() * self.kernel_size()) as f32;
+        let normalization = 1.0 / kernel_area; // Pre-compute reciprocal
 
         // Process in raster scan order
         for y in 0..height {
@@ -263,7 +269,7 @@ where
                 }
 
                 // Compute output
-                let mut pixel_data: Vec<P::Subpixel> = Vec::with_capacity(channels);
+                let mut pixel_data = [P::Subpixel::DEFAULT_MIN_VALUE; 4]; // Fixed-size array for better performance
 
                 if x == 0 {
                     // First column - compute directly
@@ -271,9 +277,10 @@ where
                         let mut sum = 0.0f32;
                         for i in 0..self.kernel_size() {
                             let idx = (py as usize) * (pad_width as usize) + (i as usize);
-                            sum += j_buffers[c][idx];
+                            // SAFETY: Index is guaranteed to be within bounds
+                            sum += unsafe { *j_buffers[c].get_unchecked(idx) };
                         }
-                        pixel_data.push(P::Subpixel::clamp(sum * normalization));
+                        pixel_data[c] = P::Subpixel::clamp(sum * normalization);
                     }
                 } else {
                     // Get previous output pixel
@@ -285,13 +292,17 @@ where
 
                     for c in 0..channels {
                         let prev_val: f32 = prev_pixel.channels()[c].into();
-                        let new_val = (j_buffers[c][j_right_idx] - j_buffers[c][j_left_idx])
-                            .mul_add(normalization, prev_val);
-                        pixel_data.push(P::Subpixel::clamp(new_val));
+                        // SAFETY: Indices are guaranteed to be within bounds
+                        let new_val = unsafe {
+                            (*j_buffers[c].get_unchecked(j_right_idx)
+                                - *j_buffers[c].get_unchecked(j_left_idx))
+                            .mul_add(normalization, prev_val)
+                        };
+                        pixel_data[c] = P::Subpixel::clamp(new_val);
                     }
                 }
 
-                let pixel = *P::from_slice(&pixel_data);
+                let pixel = *P::from_slice(&pixel_data[..channels]);
                 output.put_pixel(x, y, pixel);
             }
         }

@@ -140,6 +140,8 @@ where
         ]
     }
 }
+
+/// Generic merge_alpha function
 fn merge_alpha<S>(pixel: LumaA<S>) -> Luma<S>
 where
     S: Primitive + Into<f32> + Clamp<f32>,

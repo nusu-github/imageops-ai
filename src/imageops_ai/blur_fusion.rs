@@ -150,9 +150,10 @@
 use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterIntegral};
 use crate::utils::validate_matching_dimensions;
 use crate::AlphaMaskError;
-use image::{ImageBuffer, Luma, LumaA, Pixel, Primitive, Rgb};
+use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
-use itertools::izip;
+
+const CHUNK_SIZE: usize = 8;
 
 /// Trait for performing Blur-Fusion foreground estimation on RGB images
 ///
@@ -300,18 +301,39 @@ where
     let (f_hat, b_hat) =
         compute_optimized_smoothed_estimates(foreground, background, alpha, radius)?;
 
-    // Phase 2: Apply final foreground estimation (Equation 7)
+    // Phase 2: Apply final foreground estimation (Equation 7) with chunked processing
     let max_val = T::DEFAULT_MAX_VALUE.into();
-    for (i_pixel, f_hat_pixel, b_hat_pixel, Luma([alpha_val]), f_pixel) in izip!(
-        image.pixels(),
-        f_hat.pixels(),
-        b_hat.pixels(),
-        alpha.pixels(),
-        foreground.pixels_mut()
-    ) {
-        let normalized_alpha = (*alpha_val).into() / max_val;
-        *f_pixel =
-            compute_final_foreground_pixel(*i_pixel, *f_hat_pixel, *b_hat_pixel, normalized_alpha);
+    let inv_max_val = 1.0 / max_val;
+    let (width, height) = image.dimensions();
+    let total_pixels = (width * height) as usize;
+
+    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
+        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
+
+        for i in chunk_start..chunk_end {
+            let i_pixel = &image.as_raw()[i * 3..i * 3 + 3];
+            let f_hat_pixel = &f_hat.as_raw()[i * 3..i * 3 + 3];
+            let b_hat_pixel = &b_hat.as_raw()[i * 3..i * 3 + 3];
+            let alpha_val = alpha.as_raw()[i];
+
+            let normalized_alpha = alpha_val.into() * inv_max_val;
+
+            // Inline final foreground computation for better performance
+            let beta = 1.0 - normalized_alpha;
+            let foreground_raw = foreground.as_mut();
+
+            // Process all three channels
+            for c in 0..3 {
+                let i_c = i_pixel[c].into();
+                let f_hat_c = f_hat_pixel[c].into();
+                let b_hat_c = b_hat_pixel[c].into();
+
+                let correction = beta.mul_add(-b_hat_c, normalized_alpha.mul_add(-f_hat_c, i_c));
+                let final_val = normalized_alpha.mul_add(correction, f_hat_c);
+
+                foreground_raw[i * 3 + c] = T::clamp(final_val);
+            }
+        }
     }
 
     Ok(())
@@ -336,122 +358,97 @@ where
 {
     let (width, height) = foreground.dimensions();
 
-    let mut fg_weighted = ImageBuffer::new(width, height);
-    let mut bg_weighted = ImageBuffer::new(width, height);
-    let mut alpha_beta_weighted = ImageBuffer::new(width, height);
+    let mut fg_weighted: Image<Rgb<f32>> = ImageBuffer::new(width, height);
+    let mut bg_weighted: Image<Rgb<f32>> = ImageBuffer::new(width, height);
+    let mut alpha_weighted: Image<Luma<f32>> = ImageBuffer::new(width, height);
+    let mut beta_weighted: Image<Luma<f32>> = ImageBuffer::new(width, height);
 
-    for (
-        fg_pixel,
-        bg_pixel,
-        alpha_beta_pixel,
-        fg_weighted_pixel,
-        bg_weighted_pixel,
-        alpha_beta_weighted_pixel,
-    ) in izip!(
-        foreground.pixels(),
-        background.pixels(),
-        alpha.pixels(),
-        fg_weighted.pixels_mut(),
-        bg_weighted.pixels_mut(),
-        alpha_beta_weighted.pixels_mut()
-    ) {
-        let Rgb([fg_r, fg_g, fg_b]) = *fg_pixel;
-        let Rgb([bg_r, bg_g, bg_b]) = *bg_pixel;
-        let Luma([alpha]) = *alpha_beta_pixel;
-        let beta = (T::DEFAULT_MAX_VALUE - alpha).into();
-        *fg_weighted_pixel = Rgb([
-            fg_r.into() * alpha.into(),
-            fg_g.into() * alpha.into(),
-            fg_b.into() * alpha.into(),
-        ]);
-        *bg_weighted_pixel = Rgb([bg_r.into() * beta, bg_g.into() * beta, bg_b.into() * beta]);
-        *alpha_beta_weighted_pixel = LumaA([alpha.into(), beta]);
+    // Process pixels in chunks for better cache efficiency and potential vectorization
+    let max_val = T::DEFAULT_MAX_VALUE;
+
+    let total_pixels = (width * height) as usize;
+    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
+        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
+
+        for i in chunk_start..chunk_end {
+            let fg_pixel = &foreground.as_raw()[i * 3..i * 3 + 3];
+            let bg_pixel = &background.as_raw()[i * 3..i * 3 + 3];
+            let alpha_val = alpha.as_raw()[i];
+
+            let alpha_f32 = alpha_val.into();
+            let beta_f32 = (max_val - alpha_val).into();
+
+            // Update fg_weighted
+            let fg_weighted_raw = fg_weighted.as_mut();
+            fg_weighted_raw[i * 3] = fg_pixel[0].into() * alpha_f32;
+            fg_weighted_raw[i * 3 + 1] = fg_pixel[1].into() * alpha_f32;
+            fg_weighted_raw[i * 3 + 2] = fg_pixel[2].into() * alpha_f32;
+
+            // Update bg_weighted
+            let bg_weighted_raw = bg_weighted.as_mut();
+            bg_weighted_raw[i * 3] = bg_pixel[0].into() * beta_f32;
+            bg_weighted_raw[i * 3 + 1] = bg_pixel[1].into() * beta_f32;
+            bg_weighted_raw[i * 3 + 2] = bg_pixel[2].into() * beta_f32;
+
+            // Update alpha and beta weighted
+            alpha_weighted.as_mut()[i] = alpha_f32;
+            beta_weighted.as_mut()[i] = beta_f32;
+        }
     }
 
     // Apply box filter to all weighted images using integral image implementation
     let filter = BoxFilterIntegral::new(radius).unwrap(); // radius already validated
-    let (fg_blurred, bg_blurred, alpha_beta_weights_blurred) = (
+    let (fg_blurred, bg_blurred, alpha_weights_blurred, beta_weights_blurred) = (
         filter.filter(&fg_weighted).unwrap(),
         filter.filter(&bg_weighted).unwrap(),
-        filter.filter(&alpha_beta_weighted).unwrap(),
+        filter.filter(&alpha_weighted).unwrap(),
+        filter.filter(&beta_weighted).unwrap(),
     );
 
     // Reconstruct final averaged images using direct calculations
-    let mut f_hat = ImageBuffer::new(width, height);
-    let mut b_hat = ImageBuffer::new(width, height);
+    let mut f_hat: Image<Rgb<T>> = ImageBuffer::new(width, height);
+    let mut b_hat: Image<Rgb<T>> = ImageBuffer::new(width, height);
 
-    for (
-        fg_pixel,
-        bg_pixel,
-        fg_blurred_pixel,
-        bg_blurred_pixel,
-        alpha_beta_weights_blurred_pixel,
-        f_hat_pixel,
-        b_hat_pixel,
-    ) in izip!(
-        foreground.pixels(),
-        background.pixels(),
-        fg_blurred.pixels(),
-        bg_blurred.pixels(),
-        alpha_beta_weights_blurred.pixels(),
-        f_hat.pixels_mut(),
-        b_hat.pixels_mut(),
-    ) {
-        let LumaA([alpha_weight, beta_weight]) = *alpha_beta_weights_blurred_pixel;
+    // Process reconstruction in chunks for better cache efficiency
+    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
+        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
 
-        if alpha_weight > 0.0 {
-            let inv_alpha_weight = 1.0 / alpha_weight;
-            let Rgb([fg_sum_r, fg_sum_g, fg_sum_b]) = *fg_blurred_pixel;
-            *f_hat_pixel = Rgb([
-                Clamp::clamp(fg_sum_r * inv_alpha_weight),
-                Clamp::clamp(fg_sum_g * inv_alpha_weight),
-                Clamp::clamp(fg_sum_b * inv_alpha_weight),
-            ]);
-        } else {
-            *f_hat_pixel = *fg_pixel;
-        }
+        for i in chunk_start..chunk_end {
+            let fg_pixel = &foreground.as_raw()[i * 3..i * 3 + 3];
+            let bg_pixel = &background.as_raw()[i * 3..i * 3 + 3];
+            let fg_blurred = &fg_blurred.as_raw()[i * 3..i * 3 + 3];
+            let bg_blurred = &bg_blurred.as_raw()[i * 3..i * 3 + 3];
+            let alpha_weight: f32 = alpha_weights_blurred.as_raw()[i];
+            let beta_weight: f32 = beta_weights_blurred.as_raw()[i];
 
-        if beta_weight > 0.0 {
-            let inv_beta_weight = 1.0 / beta_weight;
-            let Rgb([bg_sum_r, bg_sum_g, bg_sum_b]) = *bg_blurred_pixel;
-            *b_hat_pixel = Rgb([
-                Clamp::clamp(bg_sum_r * inv_beta_weight),
-                Clamp::clamp(bg_sum_g * inv_beta_weight),
-                Clamp::clamp(bg_sum_b * inv_beta_weight),
-            ]);
-        } else {
-            *b_hat_pixel = *bg_pixel;
+            let f_hat_raw = f_hat.as_mut();
+            let b_hat_raw = b_hat.as_mut();
+
+            if alpha_weight > 0.0 {
+                let inv_alpha_weight = 1.0 / alpha_weight;
+                f_hat_raw[i * 3] = T::clamp(fg_blurred[0] * inv_alpha_weight);
+                f_hat_raw[i * 3 + 1] = T::clamp(fg_blurred[1] * inv_alpha_weight);
+                f_hat_raw[i * 3 + 2] = T::clamp(fg_blurred[2] * inv_alpha_weight);
+            } else {
+                f_hat_raw[i * 3] = T::clamp(fg_pixel[0].into());
+                f_hat_raw[i * 3 + 1] = T::clamp(fg_pixel[1].into());
+                f_hat_raw[i * 3 + 2] = T::clamp(fg_pixel[2].into());
+            }
+
+            if beta_weight > 0.0 {
+                let inv_beta_weight = 1.0 / beta_weight;
+                b_hat_raw[i * 3] = T::clamp(bg_blurred[0] * inv_beta_weight);
+                b_hat_raw[i * 3 + 1] = T::clamp(bg_blurred[1] * inv_beta_weight);
+                b_hat_raw[i * 3 + 2] = T::clamp(bg_blurred[2] * inv_beta_weight);
+            } else {
+                b_hat_raw[i * 3] = T::clamp(bg_pixel[0].into());
+                b_hat_raw[i * 3 + 1] = T::clamp(bg_pixel[1].into());
+                b_hat_raw[i * 3 + 2] = T::clamp(bg_pixel[2].into());
+            }
         }
     }
 
     Ok((f_hat, b_hat))
-}
-
-/// Computes the final foreground pixel using Equation 7
-///
-/// F_i = F̂_i + α_i * (I_i - α_i * F̂_i - (1-α_i) * B̂_i)
-#[inline]
-fn compute_final_foreground_pixel<T>(i: Rgb<T>, f_hat: Rgb<T>, b_hat: Rgb<T>, alpha: f32) -> Rgb<T>
-where
-    Rgb<T>: Pixel<Subpixel = T>,
-    T: Into<f32> + Clamp<f32> + Primitive,
-{
-    let beta = 1.0 - alpha;
-
-    let mut result = [T::DEFAULT_MIN_VALUE; 3];
-    for c in 0..3 {
-        let i_c = i[c].into();
-        let f_hat_c = f_hat[c].into();
-        let b_hat_c = b_hat[c].into();
-
-        // F_i = F_hat_i + alpha_i * (I_i - alpha_i * F_hat_i - (1-alpha_i) * B_hat_i)
-        let correction = beta.mul_add(-b_hat_c, alpha.mul_add(-f_hat_c, i_c));
-        let final_val = alpha.mul_add(correction, f_hat_c);
-
-        result[c] = T::clamp(final_val);
-    }
-
-    Rgb(result)
 }
 
 /// Validates input parameters

@@ -429,7 +429,8 @@ impl FastGuidedFilterImpl {
     {
         let guidance_f32 = to_f32_luma(guidance);
         let (width, height) = guidance_f32.dimensions();
-        let (new_width, new_height, scaled_radius) = Self::compute_scale_params(width, height, scale, radius);
+        let (new_width, new_height, scaled_radius) =
+            Self::compute_scale_params(width, height, scale, radius);
 
         // ダウンサンプリング用のリサイズ関数を作成
         let guidance_sub = resize_image(&guidance_f32, new_width, new_height);
@@ -487,7 +488,8 @@ impl FastGuidedFilterImpl {
     {
         let guidance_f32_full = to_f32_rgb(guidance);
         let (width, height) = guidance_f32_full.dimensions();
-        let (new_width, new_height, scaled_radius) = Self::compute_scale_params(width, height, scale, radius);
+        let (new_width, new_height, scaled_radius) =
+            Self::compute_scale_params(width, height, scale, radius);
 
         let guidance_sub = resize_image(&guidance_f32_full, new_width, new_height);
         // Create color filter directly with f32 data

@@ -35,7 +35,7 @@ impl OneSidedBoxFilter {
     }
 }
 
-/// Helper function to pad image with edge replication
+/// Optimized helper function to pad image with edge replication
 fn pad_image<P, S>(image: &ImageBuffer<P, Vec<S>>, pad_size: u32) -> ImageBuffer<P, Vec<S>>
 where
     P: Pixel<Subpixel = S>,
@@ -45,125 +45,171 @@ where
     let new_width = width + 2 * pad_size;
     let new_height = height + 2 * pad_size;
 
+    // Optimized approach: use from_fn but with reduced condition branches
     ImageBuffer::from_fn(new_width, new_height, |x, y| {
-        let orig_x = if x < pad_size {
-            0
-        } else if x >= width + pad_size {
-            width - 1
-        } else {
-            x - pad_size
-        };
-
-        let orig_y = if y < pad_size {
-            0
-        } else if y >= height + pad_size {
-            height - 1
-        } else {
-            y - pad_size
-        };
-
+        let orig_x = x.saturating_sub(pad_size).min(width - 1);
+        let orig_y = y.saturating_sub(pad_size).min(height - 1);
         *image.get_pixel(orig_x, orig_y)
     })
 }
 
+/// Optimized box sum calculation function
+#[inline]
+fn box_sum(
+    integral: &[f32],
+    integral_width: usize,
+    y1: usize,
+    x1: usize,
+    y2: usize,
+    x2: usize,
+) -> f32 {
+    integral[y2 * integral_width + x2]
+        - integral[y1 * integral_width + x2]
+        - integral[y2 * integral_width + x1]
+        + integral[y1 * integral_width + x1]
+}
+
+/// Pre-computed region coordinates for OSBF
+#[derive(Debug, Clone)]
+struct OSBFRegions {
+    /// Quarter window coordinates: (y1, x1, y2, x2)
+    quarters: [(usize, usize, usize, usize); 4],
+    /// Half window coordinates: (y1, x1, y2, x2)
+    halves: [(usize, usize, usize, usize); 4],
+    quarter_area: f32,
+    half_area: f32,
+}
+
+impl OSBFRegions {
+    const fn new(py: usize, px: usize, r: usize) -> Self {
+        let py_sub_r = py.saturating_sub(r);
+        let px_sub_r = px.saturating_sub(r);
+
+        let quarters = [
+            (py, px_sub_r, py + r + 1, px + 1),   // q1
+            (py, px, py + r + 1, px + r + 1),     // q2
+            (py_sub_r, px, py + 1, px + r + 1),   // q3
+            (py_sub_r, px_sub_r, py + 1, px + 1), // q4
+        ];
+
+        let halves = [
+            (py_sub_r, px_sub_r, py + r + 1, px + 1), // h1
+            (py_sub_r, px, py + r + 1, px + r + 1),   // h2
+            (py, px_sub_r, py + r + 1, px + r + 1),   // h3
+            (py_sub_r, px_sub_r, py + 1, px + r + 1), // h4
+        ];
+
+        let quarter_area = ((r + 1) * (r + 1)) as f32;
+        let half_area = ((r + 1) * (2 * r + 1)) as f32;
+
+        Self {
+            quarters,
+            halves,
+            quarter_area,
+            half_area,
+        }
+    }
+}
 
 /// Perform one OSBF iteration on the entire image
-fn osbf_iteration<P>(
-    image: &Image<P>,
-    radius: u32,
-) -> Result<Image<P>, OSBFilterError>
+fn osbf_iteration<P>(image: &Image<P>, radius: u32) -> Result<Image<P>, OSBFilterError>
 where
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
     let (width, height) = image.dimensions();
     let channels = P::CHANNEL_COUNT as usize;
-    
+
     // Pad the image
     let padded = pad_image(image, 2);
     let (pad_width, pad_height) = padded.dimensions();
     let pad_size = 2;
-    
-    // Create integral images for each channel
+
+    // Create integral images for each channel using optimized 1D layout
     let integral_width = (pad_width + 1) as usize;
     let integral_height = (pad_height + 1) as usize;
     let integral_size = integral_width * integral_height;
-    let mut channel_integrals = vec![vec![0.0f32; integral_size]; channels];
-    
-    // Build integral images using enumerate_pixels for efficiency
-    padded.enumerate_pixels().for_each(|(x, y, pixel)| {
-        let pixel_channels = pixel.channels();
-        for c in 0..channels {
-            let val: f32 = pixel_channels[c].into();
+    let mut channel_integrals = vec![0.0f32; channels * integral_size];
+
+    // Build integral images row by row for better cache efficiency
+    for y in 0..pad_height {
+        for x in 0..pad_width {
+            let pixel = padded.get_pixel(x, y);
+            let pixel_channels = pixel.channels();
+
             let current_idx = ((y + 1) as usize) * integral_width + ((x + 1) as usize);
             let top_idx = (y as usize) * integral_width + ((x + 1) as usize);
             let left_idx = ((y + 1) as usize) * integral_width + (x as usize);
             let diag_idx = (y as usize) * integral_width + (x as usize);
-            
-            channel_integrals[c][current_idx] = 
-                val + channel_integrals[c][top_idx] + channel_integrals[c][left_idx] 
-                - channel_integrals[c][diag_idx];
+
+            for c in 0..channels {
+                let val: f32 = pixel_channels[c].into();
+                let base_offset = c * integral_size;
+
+                channel_integrals[base_offset + current_idx] = val
+                    + channel_integrals[base_offset + top_idx]
+                    + channel_integrals[base_offset + left_idx]
+                    - channel_integrals[base_offset + diag_idx];
+            }
         }
-    });
-    
-    // Pre-compute area constants
+    }
+
+    // Pre-compute radius and area constants
     let r = radius as usize;
-    let quarter_area = ((r + 1) * (r + 1)) as f32;
-    let half_area = ((r + 1) * (2 * r + 1)) as f32;
-    
-    // Process image using ImageBuffer::from_fn for efficiency
+
+    // Reusable pixel data buffer
+    let mut pixel_data = Vec::with_capacity(channels);
+
+    // Process image using optimized pixel mapping
     let output = ImageBuffer::from_fn(width, height, |x, y| {
         // Coordinates in padded space
         let py = (y + pad_size as u32) as usize;
         let px = (x + pad_size as u32) as usize;
-        
+
         // Get current pixel value
         let current_pixel = image.get_pixel(x, y);
         let current_channels = current_pixel.channels();
-        
-        let mut pixel_data: Vec<P::Subpixel> = Vec::with_capacity(channels);
-        
+
+        // Pre-compute regions for this pixel
+        let regions = OSBFRegions::new(py, px, r);
+
+        pixel_data.clear();
+
         for c in 0..channels {
             let current_val: f32 = current_channels[c].into();
             let mut min_diff = f32::INFINITY;
             let mut best_val = current_val;
-            
-            // Helper closure for box sum calculation
-            let box_sum = |y1: usize, x1: usize, y2: usize, x2: usize| -> f32 {
-                channel_integrals[c][y2 * integral_width + x2]
-                    - channel_integrals[c][y1 * integral_width + x2]
-                    - channel_integrals[c][y2 * integral_width + x1]
-                    + channel_integrals[c][y1 * integral_width + x1]
-            };
-            
-            // Calculate all 8 regions
-            // Quarter windows
-            let q1 = box_sum(py, px.saturating_sub(r), py + r + 1, px + 1) / quarter_area;
-            let q2 = box_sum(py, px, py + r + 1, px + r + 1) / quarter_area;
-            let q3 = box_sum(py.saturating_sub(r), px, py + 1, px + r + 1) / quarter_area;
-            let q4 = box_sum(py.saturating_sub(r), px.saturating_sub(r), py + 1, px + 1) / quarter_area;
-            
-            // Half windows
-            let h1 = box_sum(py.saturating_sub(r), px.saturating_sub(r), py + r + 1, px + 1) / half_area;
-            let h2 = box_sum(py.saturating_sub(r), px, py + r + 1, px + r + 1) / half_area;
-            let h3 = box_sum(py, px.saturating_sub(r), py + r + 1, px + r + 1) / half_area;
-            let h4 = box_sum(py.saturating_sub(r), px.saturating_sub(r), py + 1, px + r + 1) / half_area;
-            
-            // Find best value
-            for &val in &[q1, q2, q3, q4, h1, h2, h3, h4] {
+
+            let integral_base = &channel_integrals[c * integral_size..];
+
+            // Calculate quarter windows
+            for &(y1, x1, y2, x2) in &regions.quarters {
+                let val =
+                    box_sum(integral_base, integral_width, y1, x1, y2, x2) / regions.quarter_area;
                 let diff = (val - current_val).abs();
                 if diff < min_diff {
                     min_diff = diff;
                     best_val = val;
                 }
             }
-            
+
+            // Calculate half windows
+            for &(y1, x1, y2, x2) in &regions.halves {
+                let val =
+                    box_sum(integral_base, integral_width, y1, x1, y2, x2) / regions.half_area;
+                let diff = (val - current_val).abs();
+                if diff < min_diff {
+                    min_diff = diff;
+                    best_val = val;
+                }
+            }
+
             pixel_data.push(P::Subpixel::clamp(best_val));
         }
-        
+
         *P::from_slice(&pixel_data)
     });
-    
+
     Ok(output)
 }
 
@@ -320,7 +366,10 @@ mod tests {
     #[test]
     fn test_invalid_radius() {
         let result = OneSidedBoxFilter::new(0);
-        assert!(matches!(result, Err(OSBFilterError::InvalidRadius { radius: 0 })));
+        assert!(matches!(
+            result,
+            Err(OSBFilterError::InvalidRadius { radius: 0 })
+        ));
     }
 
     #[test]
@@ -328,7 +377,10 @@ mod tests {
         let img = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
         let filter = OneSidedBoxFilter::new(1).unwrap();
         let result = filter.filter(&img, 0);
-        assert!(matches!(result, Err(OSBFilterError::InvalidIterations { iterations: 0 })));
+        assert!(matches!(
+            result,
+            Err(OSBFilterError::InvalidIterations { iterations: 0 })
+        ));
     }
 
     #[test]
@@ -336,7 +388,13 @@ mod tests {
         let img: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(0, 0);
         let filter = OneSidedBoxFilter::new(1).unwrap();
         let result = filter.filter(&img, 1);
-        assert!(matches!(result, Err(OSBFilterError::EmptyImage { width: 0, height: 0 })));
+        assert!(matches!(
+            result,
+            Err(OSBFilterError::EmptyImage {
+                width: 0,
+                height: 0
+            })
+        ));
     }
 
     #[test]

@@ -79,6 +79,7 @@ fn bench_alpha_premultiply(c: &mut Criterion) {
     ];
 
     let mut group = c.benchmark_group("alpha_premultiply");
+    group.sample_size(10);
 
     for (width, height) in sizes {
         let pixels = width * height;
@@ -106,6 +107,7 @@ fn bench_alpha_mask_application(c: &mut Criterion) {
     ];
 
     let mut group = c.benchmark_group("alpha_mask_application");
+    group.sample_size(10);
 
     for (width, height) in sizes {
         let pixels = width * height;
@@ -170,6 +172,7 @@ fn bench_padding_operations(c: &mut Criterion) {
     let positions = vec![Position::Center, Position::TopLeft, Position::BottomRight];
 
     let mut group = c.benchmark_group("padding_operations");
+    group.sample_size(10);
 
     for (width, height) in base_sizes {
         for position in &positions {
@@ -215,6 +218,7 @@ fn bench_square_padding(c: &mut Criterion) {
     ];
 
     let mut group = c.benchmark_group("square_padding");
+    group.sample_size(10);
 
     for (width, height) in rectangular_sizes {
         let max_dim = width.max(height);
