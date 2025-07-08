@@ -9,7 +9,7 @@
 //! - **Foreground Color Estimation**: Foreground color estimation using the Blur-Fusion algorithm
 //! - **Boundary Clipping**: Automatic detection and clipping of minimum boundaries
 //! - **Padding**: Smart padding at various positions
-//! - **Box Filtering**: High-performance box filtering with integral image and OP-SAT algorithms
+//! - **Box Filtering**: High-performance box filtering with integral image algorithm
 //! - **One-Sided Box Filter**: Edge-preserving smoothing filter for image denoising
 //! - **INTER_AREA Resize**: High-quality image downscaling using OpenCV's INTER_AREA algorithm
 //!
@@ -32,7 +32,7 @@
 //!
 //! // Box filtering with method chaining
 //! let image: Image<Rgb<u8>> = Image::new(100, 100);
-//! let filtered = image.box_filter_integral(3)?;
+//! let filtered = image.box_filter(3)?;
 //!
 //! // One-Sided Box Filter for edge-preserving smoothing
 //! let image: Image<Rgb<u8>> = Image::new(100, 100);
@@ -71,7 +71,7 @@ pub use error::{
 pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ModifyAlpha};
 pub use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
-pub use imageops_ai::box_filter::{BoxFilter, BoxFilterExt, BoxFilterIntegral, BoxFilterOPSAT};
+pub use imageops_ai::box_filter::{BorderType, BoxFilter, BoxFilterExt};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
 pub use imageops_ai::guided_filter::{
     FastGuidedFilterImpl, GuidedFilterColor, GuidedFilterExtension, GuidedFilterGray,

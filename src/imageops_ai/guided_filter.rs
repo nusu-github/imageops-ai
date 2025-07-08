@@ -1,5 +1,5 @@
 use crate::error::GuidedFilterError;
-use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterIntegral};
+use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable};
 use image::{GenericImage, GenericImageView, ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::Image;
 use imageproc::map::{map_colors, map_colors2, map_pixels, map_subpixels};
@@ -256,12 +256,12 @@ fn convert_f32_to_u8_luma(image: &Image<Luma<f32>>) -> Image<Luma<u8>> {
 }
 
 pub fn box_filter(image: &Image<Luma<f32>>, radius: u32) -> Image<Luma<f32>> {
-    let filter = BoxFilterIntegral::new(radius).expect("Invalid radius");
+    let filter = BoxFilterSeparable::new(radius).expect("Invalid radius");
     filter.filter(image).expect("Box filter failed")
 }
 
 pub fn box_filter_rgb(image: &Image<Rgb<f32>>, radius: u32) -> Image<Rgb<f32>> {
-    let filter = BoxFilterIntegral::new(radius).expect("Invalid radius");
+    let filter = BoxFilterSeparable::new(radius).expect("Invalid radius");
     filter.filter(image).expect("Box filter failed")
 }
 

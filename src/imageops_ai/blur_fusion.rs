@@ -147,7 +147,7 @@
 //! [2] Porter, T., & Duff, T. "Compositing digital images."
 //!     ACM SIGGRAPH Computer Graphics, 1984.
 
-use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterIntegral};
+use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable};
 use crate::utils::validate_matching_dimensions;
 use crate::AlphaMaskError;
 use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb};
@@ -397,7 +397,7 @@ where
     }
 
     // Apply box filter to all weighted images using integral image implementation
-    let filter = BoxFilterIntegral::new(radius).unwrap(); // radius already validated
+    let filter = BoxFilterSeparable::new(radius).unwrap(); // radius already validated
     let (fg_blurred, bg_blurred, alpha_weights_blurred, beta_weights_blurred) = (
         filter.filter(&fg_weighted).unwrap(),
         filter.filter(&bg_weighted).unwrap(),
@@ -530,7 +530,7 @@ mod tests {
     fn test_box_filter_integration() {
         // 基本的なテスト: 均一な画像
         let image = ImageBuffer::from_fn(5, 5, |_, _| Luma([1.0f32]));
-        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filter = BoxFilterSeparable::new(1).unwrap();
         let filtered = filter.filter(&image).unwrap();
         assert_eq!(filtered.get_pixel(2, 2)[0], 1.0);
 
@@ -557,7 +557,7 @@ mod tests {
         // 基本的なテスト: 均一な画像でのIntegral実装
         let image = ImageBuffer::from_fn(7, 7, |_, _| Luma([2.0f32]));
 
-        let integral_filter = BoxFilterIntegral::new(2).unwrap();
+        let integral_filter = BoxFilterSeparable::new(2).unwrap();
         let integral_result = integral_filter.filter(&image).unwrap();
 
         // 均一な画像では全てのピクセルが同じ値になるべき

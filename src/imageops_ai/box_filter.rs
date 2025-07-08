@@ -1,6 +1,29 @@
 use crate::error::BoxFilterError;
-use image::{ImageBuffer, Pixel, Primitive};
+use image::{ImageBuffer, Pixel};
 use imageproc::definitions::{Clamp, Image};
+use std::marker::PhantomData;
+
+/// Border handling types for box filter operations
+/// Corresponds to OpenCV's BorderTypes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderType {
+    /// Fill with constant value (default: 0)
+    Constant = 0,
+    /// Replicate edge pixels
+    Replicate = 1,
+    /// Reflect at edges (abcdefgh -> gfedcba|abcdefgh|hgfedcb)
+    Reflect = 2,
+    /// Wrap around (abcdefgh -> cdefgh|abcdefgh|abcdef)
+    Wrap = 3,
+    /// Reflect at edges without repeating edge pixels (abcdefgh -> gfedcb|abcdefgh|gfedcb)
+    Reflect101 = 4,
+}
+
+impl Default for BorderType {
+    fn default() -> Self {
+        Self::Reflect101
+    }
+}
 
 /// Trait for box filter implementations
 pub trait BoxFilter<P>
@@ -11,15 +34,72 @@ where
     fn filter(&self, image: &Image<P>) -> Result<Image<P>, BoxFilterError>;
 }
 
-/// Integral image based box filter with O(1) complexity per pixel
-pub struct BoxFilterIntegral {
+/// Separable box filter implementation inspired by OpenCV
+/// Uses row and column filters for better memory efficiency
+pub struct BoxFilterSeparable {
     radius: u32,
+    border_type: BorderType,
 }
 
-impl BoxFilterIntegral {
-    /// Create a new integral image based box filter
+/// Border handling helper functions
+mod border_utils {
+    use super::BorderType;
+
+    /// Get pixel coordinate based on border type
+    pub fn get_border_coord(coord: i32, size: u32, border_type: BorderType) -> u32 {
+        match border_type {
+            BorderType::Constant => coord.clamp(0, size as i32 - 1) as u32,
+            BorderType::Replicate => coord.clamp(0, size as i32 - 1) as u32,
+            BorderType::Reflect => {
+                if coord < 0 {
+                    (-coord - 1) as u32
+                } else if coord >= size as i32 {
+                    (2 * size as i32 - coord - 1) as u32
+                } else {
+                    coord as u32
+                }
+            }
+            BorderType::Wrap => {
+                if coord < 0 {
+                    (size as i32 + coord) as u32
+                } else if coord >= size as i32 {
+                    (coord - size as i32) as u32
+                } else {
+                    coord as u32
+                }
+            }
+            BorderType::Reflect101 => {
+                if coord < 0 {
+                    (-coord) as u32
+                } else if coord >= size as i32 {
+                    (2 * size as i32 - coord - 2) as u32
+                } else {
+                    coord as u32
+                }
+            }
+        }
+        .min(size - 1)
+    }
+}
+
+impl BoxFilterSeparable {
+    /// Create a new separable box filter with default border type
     pub const fn new(radius: u32) -> Result<Self, BoxFilterError> {
-        Ok(Self { radius })
+        Ok(Self {
+            radius,
+            border_type: BorderType::Reflect101,
+        })
+    }
+
+    /// Create a new separable box filter with specified border type
+    pub const fn new_with_border(
+        radius: u32,
+        border_type: BorderType,
+    ) -> Result<Self, BoxFilterError> {
+        Ok(Self {
+            radius,
+            border_type,
+        })
     }
 
     /// Get the kernel size (2 * radius + 1)
@@ -29,283 +109,177 @@ impl BoxFilterIntegral {
     }
 }
 
-/// One Pass Summed Area Table box filter with O(1) complexity
-pub struct BoxFilterOPSAT {
+/// Row filter for box filtering - processes horizontal sums
+struct RowFilter<P: Pixel> {
     radius: u32,
+    border_type: BorderType,
+    _phantom: PhantomData<P>,
 }
 
-impl BoxFilterOPSAT {
-    /// Create a new OP-SAT box filter
-    pub const fn new(radius: u32) -> Result<Self, BoxFilterError> {
-        Ok(Self { radius })
+impl<P: Pixel> RowFilter<P> {
+    const fn new(radius: u32, border_type: BorderType) -> Self {
+        Self {
+            radius,
+            border_type,
+            _phantom: PhantomData,
+        }
     }
 
-    /// Get the kernel size (2 * radius + 1)
-    #[inline]
-    pub const fn kernel_size(&self) -> u32 {
+    /// Apply row filter to a single row
+    fn apply_row<S>(&self, row: &[P], output: &mut [f32])
+    where
+        P: Pixel<Subpixel = S>,
+        S: Into<f32> + Copy,
+    {
+        let width = row.len();
+        let channels = P::CHANNEL_COUNT as usize;
+        let kernel_size = self.kernel_size() as usize;
+
+        // For each position in the row
+        for x in 0..width {
+            for c in 0..channels {
+                let mut sum = 0.0f32;
+
+                // Sum values in kernel window
+                for kx in 0..kernel_size {
+                    let src_x = (x as i32) + (kx as i32) - (self.radius as i32);
+                    let pixel_idx =
+                        border_utils::get_border_coord(src_x, width as u32, self.border_type)
+                            as usize;
+                    sum += row[pixel_idx].channels()[c].into();
+                }
+
+                output[x * channels + c] = sum;
+            }
+        }
+    }
+
+    const fn kernel_size(&self) -> u32 {
         2 * self.radius + 1
     }
 }
 
-/// Helper function to pad image with edge replication using optimized ImageBuffer::from_fn
-fn pad_image<P, S>(image: &ImageBuffer<P, Vec<S>>, radius: u32) -> ImageBuffer<P, Vec<S>>
-where
-    P: Pixel<Subpixel = S>,
-    S: Primitive,
-{
-    let (width, height) = image.dimensions();
-    let new_width = width + 2 * radius;
-    let new_height = height + 2 * radius;
-
-    ImageBuffer::from_fn(new_width, new_height, |x, y| {
-        // Clamp coordinates to original image bounds for edge replication
-        let orig_x = if x < radius {
-            0
-        } else if x >= width + radius {
-            width - 1
-        } else {
-            x - radius
-        };
-
-        let orig_y = if y < radius {
-            0
-        } else if y >= height + radius {
-            height - 1
-        } else {
-            y - radius
-        };
-
-        *image.get_pixel(orig_x, orig_y)
-    })
+/// Column filter for box filtering - processes vertical sums
+struct ColumnFilter<P: Pixel> {
+    radius: u32,
+    border_type: BorderType,
+    normalize: bool,
+    _phantom: PhantomData<P>,
 }
 
-/// Implement BoxFilter for pixel types with numeric subpixels
-impl<P> BoxFilter<P> for BoxFilterIntegral
-where
-    P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
-{
-    fn filter(&self, image: &Image<P>) -> Result<Image<P>, BoxFilterError> {
-        let (width, height) = image.dimensions();
-
-        if width == 0 || height == 0 {
-            return Err(BoxFilterError::EmptyImage { width, height });
+impl<P: Pixel> ColumnFilter<P> {
+    const fn new(radius: u32, border_type: BorderType, normalize: bool) -> Self {
+        Self {
+            radius,
+            border_type,
+            normalize,
+            _phantom: PhantomData,
         }
-
-        // Check if image is large enough for the filter radius
-        let min_dimension = width.min(height);
-        if min_dimension < 2 * self.radius + 1 {
-            return Err(BoxFilterError::ImageTooSmall {
-                width,
-                height,
-                radius: self.radius,
-            });
-        }
-
-        let padded = pad_image(image, self.radius);
-        let (pad_width, pad_height) = padded.dimensions();
-        let channels = P::CHANNEL_COUNT as usize;
-
-        // Use flat vectors for better cache locality
-        let integral_width = (pad_width + 1) as usize;
-        let integral_height = (pad_height + 1) as usize;
-        let integral_size = integral_width * integral_height;
-
-        // Flat vector per channel for better memory layout
-        let mut channel_integrals = vec![vec![0.0f32; integral_size]; channels];
-
-        // Build integral images for each channel with improved indexing
-        padded.enumerate_pixels().for_each(|(x, y, pixel)| {
-            let pixel_channels = pixel.channels();
-            for c in 0..channels {
-                let val = pixel_channels[c].into();
-                let current_idx = ((y + 1) as usize) * integral_width + ((x + 1) as usize);
-                let top_idx = (y as usize) * integral_width + ((x + 1) as usize);
-                let left_idx = ((y + 1) as usize) * integral_width + (x as usize);
-                let diag_idx = (y as usize) * integral_width + (x as usize);
-
-                channel_integrals[c][current_idx] =
-                    val + channel_integrals[c][top_idx] + channel_integrals[c][left_idx]
-                        - channel_integrals[c][diag_idx];
-            }
-        });
-
-        // Create output image with optimized indexing
-        let kernel_area = (self.kernel_size() * self.kernel_size()) as f32;
-        let inv_kernel_area = 1.0 / kernel_area; // Pre-compute reciprocal for multiplication
-
-        let output = ImageBuffer::from_fn(width, height, |x, y| {
-            // Convert to padded coordinates
-            let py = y + self.radius;
-            let px = x + self.radius;
-
-            // Box boundaries in integral coordinates
-            let y1 = py - self.radius;
-            let y2 = py + self.radius + 1;
-            let x1 = px - self.radius;
-            let x2 = px + self.radius + 1;
-
-            // Use fixed-size array instead of Vec for better performance
-            let mut pixel_data = [P::Subpixel::DEFAULT_MIN_VALUE; 4];
-
-            for c in 0..channels {
-                // Use flat indexing for better cache performance with unsafe for bounds-checked removal
-                let y2_idx = (y2 as usize) * integral_width + (x2 as usize);
-                let y1_idx = (y1 as usize) * integral_width + (x2 as usize);
-                let y2_x1_idx = (y2 as usize) * integral_width + (x1 as usize);
-                let y1_x1_idx = (y1 as usize) * integral_width + (x1 as usize);
-
-                // SAFETY: Indices are guaranteed to be within bounds due to padding calculation
-                let box_sum = unsafe {
-                    *channel_integrals[c].get_unchecked(y2_idx)
-                        - *channel_integrals[c].get_unchecked(y1_idx)
-                        - *channel_integrals[c].get_unchecked(y2_x1_idx)
-                        + *channel_integrals[c].get_unchecked(y1_x1_idx)
-                };
-
-                let filtered_value = P::Subpixel::clamp(box_sum * inv_kernel_area);
-                pixel_data[c] = filtered_value;
-            }
-
-            *P::from_slice(&pixel_data[..channels])
-        });
-
-        Ok(output)
     }
-}
 
-/// Implement BoxFilter OPSAT for pixel types with numeric subpixels
-impl<P> BoxFilter<P> for BoxFilterOPSAT
-where
-    P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
-{
-    fn filter(&self, image: &Image<P>) -> Result<Image<P>, BoxFilterError> {
-        let (width, height) = image.dimensions();
-
-        if width == 0 || height == 0 {
-            return Err(BoxFilterError::EmptyImage { width, height });
-        }
-
-        // Check if image is large enough for the filter radius
-        let min_dimension = width.min(height);
-        if min_dimension < 2 * self.radius + 1 {
-            return Err(BoxFilterError::ImageTooSmall {
-                width,
-                height,
-                radius: self.radius,
-            });
-        }
-
-        let padded = pad_image(image, self.radius);
-        let (pad_width, pad_height) = padded.dimensions();
+    /// Apply column filter to intermediate buffer
+    fn apply_column<S>(&self, buffer: &[Vec<f32>], output: &mut [P])
+    where
+        P: Pixel<Subpixel = S>,
+        S: Clamp<f32> + Copy,
+    {
+        let height = buffer.len();
+        let width = if height > 0 {
+            buffer[0].len() / P::CHANNEL_COUNT as usize
+        } else {
+            0
+        };
         let channels = P::CHANNEL_COUNT as usize;
 
-        // Use flat vectors for J buffers for better cache locality
-        let j_buffer_size = (pad_width as usize) * (pad_height as usize);
-        let mut j_buffers: Vec<Vec<f32>> = vec![vec![0.0f32; j_buffer_size]; channels];
+        if width == 0 || height == 0 {
+            return;
+        }
 
-        // Initialize J for first kernel_size columns with flat indexing
-        let init_cols = self.kernel_size().min(pad_width);
-        for x in 0..init_cols {
-            for y in self.radius..(height + self.radius) {
-                let y_start = y - self.radius;
-                let y_end = y + self.radius + 1;
+        let kernel_area = if self.normalize {
+            (self.kernel_size() * self.kernel_size()) as f32
+        } else {
+            1.0f32
+        };
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut pixel_data = vec![S::clamp(0.0f32); channels];
 
                 for c in 0..channels {
                     let mut sum = 0.0f32;
-                    for yy in y_start..y_end {
-                        let pixel = padded.get_pixel(x, yy);
-                        sum += pixel.channels()[c].into();
+
+                    // Sum values in kernel window
+                    for ky in 0..self.kernel_size() as usize {
+                        let src_y = (y as i32) + (ky as i32) - (self.radius as i32);
+                        let buffer_y =
+                            border_utils::get_border_coord(src_y, height as u32, self.border_type)
+                                as usize;
+                        sum += buffer[buffer_y][x * channels + c];
                     }
-                    let idx = (y as usize) * (pad_width as usize) + (x as usize);
-                    j_buffers[c][idx] = sum;
+
+                    let filtered_value = S::clamp(sum / kernel_area);
+                    pixel_data[c] = filtered_value;
                 }
+
+                output[y * width + x] = *P::from_slice(&pixel_data);
             }
         }
+    }
 
-        // Create output image
-        let mut output = ImageBuffer::new(width, height);
-        let kernel_area = (self.kernel_size() * self.kernel_size()) as f32;
-        let normalization = 1.0 / kernel_area; // Pre-compute reciprocal
+    const fn kernel_size(&self) -> u32 {
+        2 * self.radius + 1
+    }
+}
 
-        // Process in raster scan order
+/// Implement BoxFilter for separable filter
+impl<P> BoxFilter<P> for BoxFilterSeparable
+where
+    P: Pixel,
+    P::Subpixel: Clamp<f32> + Into<f32> + Copy,
+{
+    fn filter(&self, image: &Image<P>) -> Result<Image<P>, BoxFilterError> {
+        let (width, height) = image.dimensions();
+
+        if width == 0 || height == 0 {
+            return Err(BoxFilterError::EmptyImage { width, height });
+        }
+
+        // Check if image is large enough for the filter radius
+        let min_dimension = width.min(height);
+        if min_dimension < self.kernel_size() {
+            return Err(BoxFilterError::ImageTooSmall {
+                width,
+                height,
+                radius: self.radius,
+            });
+        }
+
+        let channels = P::CHANNEL_COUNT as usize;
+        let row_filter = RowFilter::<P>::new(self.radius, self.border_type);
+        let col_filter = ColumnFilter::<P>::new(self.radius, self.border_type, true);
+
+        // First pass: apply row filter
+        let mut intermediate_buffer = Vec::with_capacity(height as usize);
+
         for y in 0..height {
-            for x in 0..width {
-                let py = y + self.radius;
-                let px = x + self.radius;
+            let mut row_output = vec![0.0f32; width as usize * channels];
+            let row_pixels: Vec<P> = (0..width).map(|x| *image.get_pixel(x, y)).collect();
 
-                // Update J(x+r, y) if needed
-                let j_x = px + self.radius;
-                if j_x < pad_width {
-                    if y == 0 {
-                        // First row - compute directly
-                        let y_start = py - self.radius;
-                        let y_end = py + self.radius + 1;
-
-                        for c in 0..channels {
-                            let mut sum = 0.0f32;
-                            for yy in y_start..y_end {
-                                let pixel = padded.get_pixel(j_x, yy);
-                                sum += pixel.channels()[c].into();
-                            }
-                            let idx = (py as usize) * (pad_width as usize) + (j_x as usize);
-                            j_buffers[c][idx] = sum;
-                        }
-                    } else {
-                        // Recursive update
-                        let top_pixel = padded.get_pixel(j_x, py + self.radius);
-                        let bottom_pixel = padded.get_pixel(j_x, py - self.radius - 1);
-
-                        for c in 0..channels {
-                            let current_idx = (py as usize) * (pad_width as usize) + (j_x as usize);
-                            let prev_idx =
-                                ((py - 1) as usize) * (pad_width as usize) + (j_x as usize);
-                            j_buffers[c][current_idx] = j_buffers[c][prev_idx]
-                                + top_pixel.channels()[c].into()
-                                - bottom_pixel.channels()[c].into();
-                        }
-                    }
-                }
-
-                // Compute output
-                let mut pixel_data = [P::Subpixel::DEFAULT_MIN_VALUE; 4]; // Fixed-size array for better performance
-
-                if x == 0 {
-                    // First column - compute directly
-                    for c in 0..channels {
-                        let mut sum = 0.0f32;
-                        for i in 0..self.kernel_size() {
-                            let idx = (py as usize) * (pad_width as usize) + (i as usize);
-                            // SAFETY: Index is guaranteed to be within bounds
-                            sum += unsafe { *j_buffers[c].get_unchecked(idx) };
-                        }
-                        pixel_data[c] = P::Subpixel::clamp(sum * normalization);
-                    }
-                } else {
-                    // Get previous output pixel
-                    let prev_pixel: &P = output.get_pixel(x - 1, y);
-                    let j_right_idx =
-                        (py as usize) * (pad_width as usize) + ((px + self.radius) as usize);
-                    let j_left_idx =
-                        (py as usize) * (pad_width as usize) + ((px - self.radius - 1) as usize);
-
-                    for c in 0..channels {
-                        let prev_val: f32 = prev_pixel.channels()[c].into();
-                        // SAFETY: Indices are guaranteed to be within bounds
-                        let new_val = unsafe {
-                            (*j_buffers[c].get_unchecked(j_right_idx)
-                                - *j_buffers[c].get_unchecked(j_left_idx))
-                            .mul_add(normalization, prev_val)
-                        };
-                        pixel_data[c] = P::Subpixel::clamp(new_val);
-                    }
-                }
-
-                let pixel = *P::from_slice(&pixel_data[..channels]);
-                output.put_pixel(x, y, pixel);
-            }
+            row_filter.apply_row(&row_pixels, &mut row_output);
+            intermediate_buffer.push(row_output);
         }
+
+        // Second pass: apply column filter
+        let default_subpixel = P::Subpixel::clamp(0.0f32);
+        let default_pixel = *P::from_slice(&vec![default_subpixel; channels]);
+        let mut output_pixels = vec![default_pixel; (width * height) as usize];
+        col_filter.apply_column(&intermediate_buffer, &mut output_pixels);
+
+        // Convert back to ImageBuffer
+        let output = ImageBuffer::from_fn(width, height, |x, y| {
+            output_pixels[(y * width + x) as usize]
+        });
+
         Ok(output)
     }
 }
@@ -317,51 +291,47 @@ pub trait BoxFilterExt<P>
 where
     P: Pixel,
 {
-    /// Apply integral image based box filter
-    fn box_filter_integral(self, radius: u32) -> Result<Self, BoxFilterError>
+    /// Apply box filter with specified border type (default: Reflect101)
+    fn box_filter(self, radius: u32) -> Result<Self, BoxFilterError>
     where
         Self: Sized;
 
-    /// Apply integral image based box filter in-place
-    fn box_filter_integral_mut(&mut self, radius: u32) -> Result<&mut Self, BoxFilterError>;
-
-    /// Apply OP-SAT box filter
-    fn box_filter_opsat(self, radius: u32) -> Result<Self, BoxFilterError>
+    /// Apply box filter with specified border type
+    fn box_filter_with_border(
+        self,
+        radius: u32,
+        border_type: BorderType,
+    ) -> Result<Self, BoxFilterError>
     where
         Self: Sized;
 
-    /// Apply OP-SAT box filter in-place
-    fn box_filter_opsat_mut(&mut self, radius: u32) -> Result<&mut Self, BoxFilterError>;
+    /// Apply box filter in-place (not available for this operation)
+    fn box_filter_mut(&mut self, radius: u32) -> Result<&mut Self, BoxFilterError>;
 }
 
 impl<P> BoxFilterExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Into<f32> + Copy,
 {
-    fn box_filter_integral(self, radius: u32) -> Result<Self, BoxFilterError> {
-        let filter = BoxFilterIntegral::new(radius)?;
+    fn box_filter(self, radius: u32) -> Result<Self, BoxFilterError> {
+        self.box_filter_with_border(radius, BorderType::default())
+    }
+
+    fn box_filter_with_border(
+        self,
+        radius: u32,
+        border_type: BorderType,
+    ) -> Result<Self, BoxFilterError> {
+        let filter = BoxFilterSeparable::new_with_border(radius, border_type)?;
         filter.filter(&self)
     }
 
     /// Hidden _mut variant that is not available for this operation
     #[doc(hidden)]
-    fn box_filter_integral_mut(&mut self, _radius: u32) -> Result<&mut Self, BoxFilterError> {
+    fn box_filter_mut(&mut self, _radius: u32) -> Result<&mut Self, BoxFilterError> {
         unimplemented!(
-            "box_filter_integral_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
-        )
-    }
-
-    fn box_filter_opsat(self, radius: u32) -> Result<Self, BoxFilterError> {
-        let filter = BoxFilterOPSAT::new(radius)?;
-        filter.filter(&self)
-    }
-
-    /// Hidden _mut variant that is not available for this operation
-    #[doc(hidden)]
-    fn box_filter_opsat_mut(&mut self, _radius: u32) -> Result<&mut Self, BoxFilterError> {
-        unimplemented!(
-            "box_filter_opsat_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
+            "box_filter_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
         )
     }
 }
@@ -372,73 +342,46 @@ mod tests {
     use image::ImageBuffer;
 
     #[test]
-    fn test_box_filter_integral_basic() {
-        use image::Rgb;
-        let mut img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
-        img.put_pixel(2, 2, Rgb([255, 255, 255]));
-
-        let filter = BoxFilterIntegral::new(1).unwrap();
-        let result = filter.filter(&img).unwrap();
-
-        // Center pixel should be averaged with neighbors
-        let center = result.get_pixel(2, 2);
-        assert!(center[0] > 100 && center[0] < 255);
-    }
-
-    #[test]
-    fn test_box_filter_opsat_basic() {
-        use image::Rgb;
-        let mut img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
-        img.put_pixel(2, 2, Rgb([255, 255, 255]));
-
-        let filter = BoxFilterOPSAT::new(1).unwrap();
-        let result = filter.filter(&img).unwrap();
-
-        // Center pixel should be averaged with neighbors
-        let center = result.get_pixel(2, 2);
-        assert!(center[0] > 100 && center[0] < 255);
-    }
-
-    #[test]
-    fn test_both_filters_produce_same_result() {
-        use image::Rgb;
-        let mut img = ImageBuffer::new(10, 10);
-        for y in 0..10 {
-            for x in 0..10 {
-                let val = ((x + y) * 10) as u8;
-                img.put_pixel(x, y, Rgb([val, val, val]));
-            }
-        }
-
-        let integral_filter = BoxFilterIntegral::new(2).unwrap();
-        let opsat_filter = BoxFilterOPSAT::new(2).unwrap();
-
-        let result_integral = integral_filter.filter(&img).unwrap();
-        let result_opsat = opsat_filter.filter(&img).unwrap();
-
-        // Results should be identical
-        for y in 0..10 {
-            for x in 0..10 {
-                let p1 = result_integral.get_pixel(x, y);
-                let p2 = result_opsat.get_pixel(x, y);
-                assert_eq!(p1, p2);
-            }
-        }
-    }
-
-    #[test]
     fn test_extension_trait() {
         use image::Rgb;
         let img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
 
         // Test chaining
-        let result = img
-            .box_filter_integral(1)
-            .unwrap()
-            .box_filter_opsat(1)
-            .unwrap();
+        let result = img.box_filter(1).unwrap().box_filter(1).unwrap();
 
         assert_eq!(result.dimensions(), (5, 5));
+    }
+
+    #[test]
+    fn test_box_filter_separable_basic() {
+        use image::Rgb;
+        let mut img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
+        img.put_pixel(2, 2, Rgb([255, 255, 255]));
+
+        let filter = BoxFilterSeparable::new(1).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Center pixel should be averaged with neighbors
+        let center = result.get_pixel(2, 2);
+        assert!(center[0] > 100 && center[0] < 255);
+    }
+
+    #[test]
+    fn test_border_type_extension_trait() {
+        use image::Rgb;
+        let img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
+
+        // Test with different border types
+        let result_default = img.clone().box_filter(1).unwrap();
+        let result_replicate = img
+            .clone()
+            .box_filter_with_border(1, BorderType::Replicate)
+            .unwrap();
+        let result_reflect = img.box_filter_with_border(1, BorderType::Reflect).unwrap();
+
+        assert_eq!(result_default.dimensions(), (5, 5));
+        assert_eq!(result_replicate.dimensions(), (5, 5));
+        assert_eq!(result_reflect.dimensions(), (5, 5));
     }
 
     #[test]
@@ -446,7 +389,7 @@ mod tests {
         use image::Luma;
         let img = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
 
-        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filter = BoxFilterSeparable::new(1).unwrap();
         let result = filter.filter(&img).unwrap();
 
         // All pixels should remain 100 due to edge replication
@@ -461,7 +404,7 @@ mod tests {
     fn test_empty_image_error() {
         use image::Rgb;
         let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(0, 0);
-        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filter = BoxFilterSeparable::new(1).unwrap();
         let result = filter.filter(&img);
 
         assert!(matches!(
@@ -477,7 +420,7 @@ mod tests {
     fn test_image_too_small_error() {
         use image::Rgb;
         let img = ImageBuffer::from_pixel(2, 2, Rgb([100u8, 100, 100]));
-        let filter = BoxFilterIntegral::new(2).unwrap(); // radius 2 needs at least 5x5 image
+        let filter = BoxFilterSeparable::new(2).unwrap(); // radius 2 needs at least 5x5 image
         let result = filter.filter(&img);
 
         assert!(matches!(
@@ -496,7 +439,7 @@ mod tests {
         let mut img = ImageBuffer::from_pixel(5, 5, Rgb([1000u16, 2000, 3000]));
         img.put_pixel(2, 2, Rgb([5000, 6000, 7000]));
 
-        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filter = BoxFilterSeparable::new(1).unwrap();
         let result = filter.filter(&img).unwrap();
 
         // Center pixel should be averaged with neighbors
@@ -512,7 +455,7 @@ mod tests {
         let mut img = ImageBuffer::from_pixel(5, 5, Luma([0.5f32]));
         img.put_pixel(2, 2, Luma([1.0]));
 
-        let filter = BoxFilterIntegral::new(1).unwrap();
+        let filter = BoxFilterSeparable::new(1).unwrap();
         let result = filter.filter(&img).unwrap();
 
         // Center pixel should be averaged with neighbors
@@ -521,17 +464,17 @@ mod tests {
     }
 
     #[test]
-    fn test_performance_large_image_integral() {
+    fn test_performance_large_image_separable() {
         use image::Rgb;
         let img = ImageBuffer::from_pixel(500, 500, Rgb([100u8, 100, 100]));
 
         let start = std::time::Instant::now();
-        let filter = BoxFilterIntegral::new(5).unwrap();
+        let filter = BoxFilterSeparable::new(5).unwrap();
         let _result = filter.filter(&img).unwrap();
         let duration = start.elapsed();
 
         println!(
-            "Box filter (500x500, radius=5) Integral took: {:?}",
+            "Box filter (500x500, radius=5) Separable took: {:?}",
             duration
         );
         // Should complete in reasonable time
@@ -539,17 +482,204 @@ mod tests {
     }
 
     #[test]
-    fn test_performance_large_image_opsat() {
+    fn test_large_image_correctness_gradient() {
         use image::Rgb;
-        let img = ImageBuffer::from_pixel(500, 500, Rgb([100u8, 100, 100]));
+        const WIDTH: u32 = 1200;
+        const HEIGHT: u32 = 1000;
 
-        let start = std::time::Instant::now();
-        let filter = BoxFilterOPSAT::new(5).unwrap();
-        let _result = filter.filter(&img).unwrap();
-        let duration = start.elapsed();
+        // Create gradient image
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let val = ((x as f32 / WIDTH as f32) * 255.0) as u8;
+                img.put_pixel(x, y, Rgb([val, val, val]));
+            }
+        }
 
-        println!("Box filter (500x500, radius=5) OPSAT took: {:?}", duration);
-        // Should complete in reasonable time
-        assert!(duration.as_millis() < 1000);
+        let radius = 10;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the gradient is properly smoothed
+        let left_avg = result.get_pixel(100, 500)[0] as f32;
+        let right_avg = result.get_pixel(WIDTH - 100, 500)[0] as f32;
+        assert!(left_avg < right_avg, "Gradient should be preserved");
+    }
+
+    #[test]
+    fn test_large_image_correctness_checkerboard() {
+        use image::Luma;
+        const WIDTH: u32 = 1024;
+        const HEIGHT: u32 = 1024;
+
+        // Create checkerboard pattern
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let val = if ((x / 50) + (y / 50)) % 2 == 0 {
+                    0u8
+                } else {
+                    255u8
+                };
+                img.put_pixel(x, y, Luma([val]));
+            }
+        }
+
+        let radius = 15;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the checkerboard is properly smoothed
+        let smoothed_center = result.get_pixel(WIDTH / 2, HEIGHT / 2)[0];
+        assert!(
+            smoothed_center > 0 && smoothed_center < 255,
+            "Checkerboard should be smoothed"
+        );
+    }
+
+    #[test]
+    fn test_large_image_correctness_random() {
+        use image::Rgb;
+        use std::num::Wrapping;
+        const WIDTH: u32 = 1100;
+        const HEIGHT: u32 = 1000;
+
+        // Create pseudo-random image using LCG
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        let mut seed = Wrapping(42u32);
+
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                // Simple LCG for deterministic randomness
+                seed = Wrapping(1664525) * seed + Wrapping(1013904223);
+                let val = (seed.0 % 256) as u8;
+                img.put_pixel(
+                    x,
+                    y,
+                    Rgb([val, val.wrapping_add(50), val.wrapping_add(100)]),
+                );
+            }
+        }
+
+        let radius = 20;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the random noise is properly smoothed
+        let smoothed_center = result.get_pixel(WIDTH / 2, HEIGHT / 2);
+
+        // The smoothed version should be within a reasonable range
+        assert!(smoothed_center[0] > 0 && smoothed_center[0] < 255);
+        assert!(smoothed_center[1] > 0 && smoothed_center[1] < 255);
+        assert!(smoothed_center[2] > 0 && smoothed_center[2] < 255);
+    }
+
+    #[test]
+    fn test_large_image_correctness_edge_cases() {
+        use image::Rgba;
+        const WIDTH: u32 = 1500;
+        const HEIGHT: u32 = 1200;
+
+        // Create image with edge cases (min/max values)
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let val = match (x / 500, y / 400) {
+                    (0, 0) => [0u8, 0, 0, 255],     // Black
+                    (1, 0) => [255, 255, 255, 255], // White
+                    (2, 0) => [255, 0, 0, 255],     // Red
+                    (0, 1) => [0, 255, 0, 255],     // Green
+                    (1, 1) => [0, 0, 255, 255],     // Blue
+                    (2, 1) => [128, 128, 128, 255], // Gray
+                    _ => [200, 150, 100, 255],      // Default
+                };
+                img.put_pixel(x, y, Rgba(val));
+            }
+        }
+
+        let radius = 25;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the colors are properly blended
+        let center = result.get_pixel(WIDTH / 2, HEIGHT / 2);
+        // At least one channel should be less than 255
+        assert!(center[0] < 255 || center[1] < 255 || center[2] < 255);
+        assert_eq!(center[3], 255); // Alpha should be preserved
+    }
+
+    #[test]
+    fn test_large_image_correctness_non_square() {
+        use image::Rgb;
+        const WIDTH: u32 = 2000;
+        const HEIGHT: u32 = 1000;
+
+        // Create diagonal gradient
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let val =
+                    (((x as f32 / WIDTH as f32 + y as f32 / HEIGHT as f32) / 2.0) * 255.0) as u8;
+                img.put_pixel(x, y, Rgb([val, 255 - val, val / 2]));
+            }
+        }
+
+        let radius = 30;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the gradient is properly smoothed
+        let top_left = result.get_pixel(100, 100);
+        let bottom_right = result.get_pixel(WIDTH - 100, HEIGHT - 100);
+
+        // The diagonal gradient should be preserved
+        assert!(top_left[0] < bottom_right[0]);
+        assert!(top_left[1] > bottom_right[1]);
+        assert!(top_left[2] < bottom_right[2]);
+    }
+
+    #[test]
+    fn test_large_image_correctness_f32() {
+        use image::Luma;
+        const WIDTH: u32 = 1280;
+        const HEIGHT: u32 = 1024;
+
+        // Create gradient with f32 pixels
+        let mut img = ImageBuffer::new(WIDTH, HEIGHT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let val = ((x as f32 / WIDTH as f32) * (y as f32 / HEIGHT as f32)).sqrt();
+                img.put_pixel(x, y, Luma([val]));
+            }
+        }
+
+        let radius = 12;
+        let filter = BoxFilterSeparable::new(radius).unwrap();
+        let result = filter.filter(&img).unwrap();
+
+        // Test that the result has the expected dimensions
+        assert_eq!(result.dimensions(), (WIDTH, HEIGHT));
+
+        // Test that the gradient is properly smoothed
+        let top_left = result.get_pixel(100, 100)[0];
+        let bottom_right = result.get_pixel(WIDTH - 100, HEIGHT - 100)[0];
+
+        // The gradient should be preserved
+        assert!(top_left < bottom_right);
     }
 }
