@@ -10,7 +10,7 @@ pub struct DecimateAlpha {
     /// Source index
     pub si: u32,
     /// Alpha value (weight)
-    pub alpha: f64,
+    pub alpha: f32,
 }
 
 /// OpenCV INTER_AREA interpolation implementation
@@ -41,11 +41,11 @@ impl InterAreaResize {
 /// 
 /// This function computes the weight table for area interpolation based on the
 /// source size, destination size, and scale factor.
-fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f64) -> Vec<DecimateAlpha> {
+fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f32) -> Vec<DecimateAlpha> {
     let mut tab = Vec::new();
     
     for dx in 0..dsize {
-        let fsx1 = dx as f64 * scale;
+        let fsx1 = dx as f32 * scale;
         let fsx2 = fsx1 + scale;
         
         let sx1 = (fsx1.ceil() as u32).min(ssize);
@@ -54,9 +54,9 @@ fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f64) -> Vec<DecimateAl
         let cell_width = if fsx2 - fsx1 != scale {
             // Handle boundary cases where the footprint extends beyond image bounds
             if sx1 == 0 {
-                sx2 as f64
+                sx2 as f32
             } else if sx2 == ssize {
-                ssize as f64 - fsx1
+                ssize as f32 - fsx1
             } else {
                 scale
             }
@@ -65,8 +65,8 @@ fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f64) -> Vec<DecimateAl
         };
         
         // Left partial overlap
-        if sx1 > 0 && (sx1 as f64 - fsx1) > 1e-3 {
-            let alpha = (sx1 as f64 - fsx1) / cell_width;
+        if sx1 > 0 && (sx1 as f32 - fsx1) > 1e-3 {
+            let alpha = (sx1 as f32 - fsx1) / cell_width;
             tab.push(DecimateAlpha {
                 di: dx,
                 si: sx1 - 1,
@@ -85,8 +85,8 @@ fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f64) -> Vec<DecimateAl
         }
         
         // Right partial overlap
-        if sx2 < ssize && (fsx2 - sx2 as f64) > 1e-3 {
-            let alpha = (fsx2 - sx2 as f64) / cell_width;
+        if sx2 < ssize && (fsx2 - sx2 as f32) > 1e-3 {
+            let alpha = (fsx2 - sx2 as f32) / cell_width;
             tab.push(DecimateAlpha {
                 di: dx,
                 si: sx2,
@@ -104,11 +104,11 @@ fn is_area_fast(src_size: u32, dst_size: u32) -> bool {
         return false;
     }
     
-    let scale = src_size as f64 / dst_size as f64;
+    let scale = src_size as f32 / dst_size as f32;
     let int_scale = scale.round() as u32;
     
     // Check if the scale is close to an integer
-    (scale - int_scale as f64).abs() < f64::EPSILON && int_scale >= 2
+    (scale - int_scale as f32).abs() < f32::EPSILON && int_scale >= 2
 }
 
 /// Fast path implementation for integer scale factors
@@ -119,16 +119,16 @@ fn resize_area_fast<P>(
 ) -> Result<Image<P>, ResizeAreaError>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f64> + Into<f64> + Primitive,
+    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
     let (src_width, src_height) = src.dimensions();
     let scale_x = src_width / dst_width;
     let scale_y = src_height / dst_height;
-    let area = (scale_x * scale_y) as f64;
+    let area = (scale_x * scale_y) as f32;
     let inv_area = 1.0 / area;
     
     let result = ImageBuffer::from_fn(dst_width, dst_height, |dx, dy| {
-        let mut pixel_sum = vec![0.0f64; P::CHANNEL_COUNT as usize];
+        let mut pixel_sum = vec![0.0f32; P::CHANNEL_COUNT as usize];
         
         let start_x = dx * scale_x;
         let start_y = dy * scale_y;
@@ -165,11 +165,11 @@ fn resize_area_general<P>(
 ) -> Result<Image<P>, ResizeAreaError>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f64> + Into<f64> + Primitive,
+    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
     let (src_width, src_height) = src.dimensions();
-    let scale_x = src_width as f64 / dst_width as f64;
-    let scale_y = src_height as f64 / dst_height as f64;
+    let scale_x = src_width as f32 / dst_width as f32;
+    let scale_y = src_height as f32 / dst_height as f32;
     
     // Compute X and Y tables
     let xtab = compute_resize_area_tab(src_width, dst_width, scale_x);
@@ -179,8 +179,8 @@ where
     let mut output = ImageBuffer::new(dst_width, dst_height);
     
     // Intermediate buffers
-    let mut buf = vec![0.0f64; dst_width as usize * channels];
-    let mut sum = vec![0.0f64; dst_width as usize * channels];
+    let mut buf = vec![0.0f32; dst_width as usize * channels];
+    let mut sum = vec![0.0f32; dst_width as usize * channels];
     
     let mut prev_dy = u32::MAX;
     
@@ -254,7 +254,7 @@ impl InterAreaResize {
     pub fn resize<P>(&self, src: &Image<P>) -> Result<Image<P>, ResizeAreaError>
     where
         P: Pixel,
-        P::Subpixel: Clamp<f64> + Into<f64> + Primitive,
+        P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
     {
         let (src_width, src_height) = src.dimensions();
         
@@ -303,7 +303,7 @@ where
 impl<P> InterAreaExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f64> + Into<f64> + Primitive,
+    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
     fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, ResizeAreaError> {
         let resizer = InterAreaResize::new(new_width, new_height)?;
@@ -344,7 +344,7 @@ mod tests {
         }
         
         for sum in weights_sum.iter() {
-            assert!((sum - 1.0).abs() < 1e-10);
+            assert!((sum - 1.0).abs() < 1e-6);
         }
     }
     
