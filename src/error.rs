@@ -274,3 +274,41 @@ pub enum OSBFilterError {
     #[error("Invalid iterations: {iterations}. Iterations must be positive")]
     InvalidIterations { iterations: u32 },
 }
+
+/// Error type for INTER_AREA resize operations
+///
+/// This error type represents failures that can occur during
+/// INTER_AREA resize operations.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum ResizeAreaError {
+    /// Invalid target dimensions
+    ///
+    /// This error occurs when the target width or height is zero.
+    #[error("Invalid target dimensions: ({width}x{height}). Dimensions must be positive")]
+    InvalidTargetDimensions { width: u32, height: u32 },
+
+    /// Image has zero dimensions
+    ///
+    /// This error occurs when the source image has zero width or height.
+    #[error("Image has zero dimensions ({width}x{height})")]
+    EmptyImage { width: u32, height: u32 },
+
+    /// Upscaling not supported
+    ///
+    /// This error occurs when attempting to upscale an image. INTER_AREA
+    /// is primarily designed for downscaling operations.
+    #[error("Upscaling not supported. Source: ({src_width}x{src_height}), Target: ({target_width}x{target_height})")]
+    UpscalingNotSupported {
+        src_width: u32,
+        src_height: u32,
+        target_width: u32,
+        target_height: u32,
+    },
+
+    /// Invalid scale factor
+    ///
+    /// This error occurs when the scale factor is invalid or results in
+    /// computational issues.
+    #[error("Invalid scale factor: {scale}. Scale must be greater than 0")]
+    InvalidScale { scale: f64 },
+}

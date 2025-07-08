@@ -11,11 +11,12 @@
 //! - **Padding**: Smart padding at various positions
 //! - **Box Filtering**: High-performance box filtering with integral image and OP-SAT algorithms
 //! - **One-Sided Box Filter**: Edge-preserving smoothing filter for image denoising
+//! - **INTER_AREA Resize**: High-quality image downscaling using OpenCV's INTER_AREA algorithm
 //!
 //! ## Example Usage
 //!
 //! ```no_run
-//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, Padding, BoxFilterExt, OSBFilterExt};
+//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, Padding, BoxFilterExt, OSBFilterExt, InterAreaExt};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Rgba, Luma};
 //!
@@ -36,6 +37,10 @@
 //! // One-Sided Box Filter for edge-preserving smoothing
 //! let image: Image<Rgb<u8>> = Image::new(100, 100);
 //! let smoothed = image.osbf(2, 5)?; // radius=2, iterations=5
+//!
+//! // INTER_AREA resize for high-quality downscaling
+//! let image: Image<Rgb<u8>> = Image::new(100, 100);
+//! let resized = image.resize_area(50, 50)?;
 //!
 //! // Image padding
 //! let image: Image<Rgb<u8>> = Image::new(50, 50);
@@ -61,7 +66,7 @@ mod test_utils;
 
 pub use error::{
     AlphaMaskError, BoxFilterError, ClipBorderError, ConvertColorError, GuidedFilterError,
-    NLMeansError, OSBFilterError, PaddingError,
+    NLMeansError, OSBFilterError, PaddingError, ResizeAreaError,
 };
 pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ModifyAlpha};
@@ -72,6 +77,7 @@ pub use imageops_ai::guided_filter::{
     FastGuidedFilterImpl, GuidedFilterColor, GuidedFilterExtension, GuidedFilterGray,
     GuidedFilterWithColorGuidance,
 };
+pub use imageops_ai::inter_area::{DecimateAlpha, InterAreaExt, InterAreaResize};
 pub use imageops_ai::nlmeans::NLMeans;
 pub use imageops_ai::osbf::{OSBFilter, OSBFilterExt, OneSidedBoxFilter};
 pub use imageops_ai::padding::{add_padding, Padding, Position};

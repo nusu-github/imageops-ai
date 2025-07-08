@@ -6,44 +6,6 @@ mod unify;
 pub use unify::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 use image::Primitive;
-use imageproc::definitions::Clamp;
-
-/// Clamps a floating-point value to the range of a primitive type.
-///
-/// This function ensures that the input value is within the valid range
-/// of the target primitive type. This version is used when Clamp trait is not available.
-///
-/// # Arguments
-///
-/// * `value` - The floating-point value to clamp
-///
-/// # Returns
-///
-/// The clamped value as the target primitive type
-#[inline]
-pub fn clamp_f32_to_primitive<T: Primitive + Clamp<f32>>(value: f32) -> T {
-    T::clamp(value)
-}
-
-/// Normalizes an alpha value from a subpixel type to a floating-point value in the range [0, 1].
-///
-/// # Arguments
-///
-/// * `alpha` - The alpha value to normalize
-///
-/// # Returns
-///
-/// The normalized alpha value as a floating-point number between 0 and 1
-#[inline]
-#[allow(dead_code)]
-pub fn normalize_alpha<S>(alpha: S) -> f32
-where
-    S: Into<f32> + Primitive,
-{
-    let alpha_f32 = alpha.into();
-    let max_value = S::DEFAULT_MAX_VALUE.into();
-    alpha_f32 / max_value
-}
 
 /// Normalizes an alpha value using a pre-computed max value.
 ///
@@ -123,35 +85,6 @@ mod tests {
         assert_eq!(normalize_alpha_with_max(0u8, 255.0), 0.0);
         assert_eq!(normalize_alpha_with_max(127u8, 255.0), 127.0 / 255.0);
         assert_eq!(normalize_alpha_with_max(255u8, 255.0), 1.0);
-    }
-
-    #[test]
-    fn test_clamp_f32_to_primitive() {
-        // Test u8 clamping
-        assert_eq!(clamp_f32_to_primitive::<u8>(-10.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(0.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u8>(127.5), 127);
-        assert_eq!(clamp_f32_to_primitive::<u8>(255.0), 255);
-        assert_eq!(clamp_f32_to_primitive::<u8>(300.0), 255);
-
-        // Test u16 clamping
-        assert_eq!(clamp_f32_to_primitive::<u16>(-10.0), 0);
-        assert_eq!(clamp_f32_to_primitive::<u16>(32767.5), 32767); // imageproc clamp behavior
-        assert_eq!(clamp_f32_to_primitive::<u16>(65535.0), 65535);
-        assert_eq!(clamp_f32_to_primitive::<u16>(70000.0), 65535);
-    }
-
-    #[test]
-    fn test_normalize_alpha() {
-        // Test u8 normalization
-        assert_eq!(normalize_alpha::<u8>(0), 0.0);
-        assert_eq!(normalize_alpha::<u8>(255), 1.0);
-        assert_eq!(normalize_alpha::<u8>(127), 127.0 / 255.0);
-
-        // Test u16 normalization
-        assert_eq!(normalize_alpha::<u16>(0), 0.0);
-        assert_eq!(normalize_alpha::<u16>(65535), 1.0);
-        assert_eq!(normalize_alpha::<u16>(32767), 32767.0 / 65535.0);
     }
 
     #[test]
