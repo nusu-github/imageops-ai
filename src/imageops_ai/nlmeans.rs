@@ -1,6 +1,7 @@
-use crate::error::NLMeansError;
 use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb, Rgba};
 use imageproc::definitions::{Clamp, Image};
+
+use crate::error::NLMeansError;
 
 /// Non-Local Means denoising trait
 ///

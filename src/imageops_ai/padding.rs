@@ -1,6 +1,7 @@
-use crate::error::PaddingError;
-use image::{GenericImage, ImageBuffer, Pixel};
+use image::{GenericImage, GenericImageView, ImageBuffer, Pixel};
 use imageproc::definitions::Image;
+
+use crate::error::PaddingError;
 
 /// Enum to specify padding position
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,7 +102,7 @@ pub fn add_padding<I, P>(
     color: P,
 ) -> Result<Image<P>, PaddingError>
 where
-    I: GenericImage<Pixel = P>,
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     let (width, height) = image.dimensions();
@@ -126,13 +127,13 @@ where
 #[inline]
 fn copy_image_optimized<I, P>(
     src: &I,
-    dst: &mut ImageBuffer<P, Vec<P::Subpixel>>,
+    dst: &mut Image<P>,
     offset_x: i64,
     offset_y: i64,
     width: u32,
     height: u32,
 ) where
-    I: GenericImage<Pixel = P>,
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     let dst_x_start = offset_x as u32;
@@ -163,14 +164,9 @@ fn copy_image_optimized<I, P>(
 
 /// Check if bulk copying is possible based on memory layout
 #[inline]
-const fn can_use_bulk_copy<I, P>(
-    _src: &I,
-    _dst: &ImageBuffer<P, Vec<P::Subpixel>>,
-    dst_x_start: u32,
-    width: u32,
-) -> bool
+const fn can_use_bulk_copy<I, P>(_src: &I, _dst: &Image<P>, dst_x_start: u32, width: u32) -> bool
 where
-    I: GenericImage<Pixel = P>,
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     // Bulk copy is efficient when:
@@ -183,13 +179,13 @@ where
 #[inline]
 fn copy_rows_bulk<I, P>(
     src: &I,
-    dst: &mut ImageBuffer<P, Vec<P::Subpixel>>,
+    dst: &mut Image<P>,
     dst_x_start: u32,
     dst_y_start: u32,
     width: u32,
     height: u32,
 ) where
-    I: GenericImage<Pixel = P>,
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     // For now, fall back to optimized pixel-by-pixel copy
@@ -214,11 +210,7 @@ fn copy_rows_bulk<I, P>(
 /// 2. Using efficient fill patterns
 /// 3. Minimizing allocation overhead
 #[inline]
-fn create_optimized_buffer<P>(
-    width: u32,
-    height: u32,
-    fill_color: P,
-) -> ImageBuffer<P, Vec<P::Subpixel>>
+fn create_optimized_buffer<P>(width: u32, height: u32, fill_color: P) -> Image<P>
 where
     P: Pixel,
 {

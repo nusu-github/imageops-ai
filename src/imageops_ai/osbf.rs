@@ -1,6 +1,7 @@
-use crate::error::OSBFilterError;
 use image::{ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
+
+use crate::error::OSBFilterError;
 
 /// Trait for One-Sided Box Filter implementations
 pub trait OSBFilter<P>
@@ -36,10 +37,10 @@ impl OneSidedBoxFilter {
 }
 
 /// Optimized helper function to pad image with edge replication
-fn pad_image<P, S>(image: &ImageBuffer<P, Vec<S>>, pad_size: u32) -> ImageBuffer<P, Vec<S>>
+fn pad_image<P>(image: &Image<P>, pad_size: u32) -> Image<P>
 where
-    P: Pixel<Subpixel = S>,
-    S: Primitive,
+    P: Pixel,
+    P::Subpixel: Primitive,
 {
     let (width, height) = image.dimensions();
     let new_width = width + 2 * pad_size;

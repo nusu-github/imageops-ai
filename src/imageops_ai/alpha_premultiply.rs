@@ -1,8 +1,12 @@
-use crate::error::ConvertColorError;
-use crate::utils::normalize_alpha_with_max;
-use image::{GenericImage, ImageBuffer, Luma, LumaA, Pixel, Primitive, Rgb, Rgba};
-use imageproc::definitions::{Clamp, Image};
-use imageproc::map::map_colors;
+use image::{
+    GenericImage, GenericImageView, ImageBuffer, Luma, LumaA, Pixel, Primitive, Rgb, Rgba,
+};
+use imageproc::{
+    definitions::{Clamp, Image},
+    map::map_colors,
+};
+
+use crate::{error::ConvertColorError, utils::normalize_alpha_with_max};
 
 /// Trait for merging (premultiplying) alpha channel into color channels.
 ///
@@ -107,15 +111,16 @@ pub trait PremultiplyAlphaInPlace {
 }
 
 /// Generic fallback implementation for LumaA -> Luma conversion with alpha premultiplication
-fn generic_premultiply_lumaa<S>(image: Image<LumaA<S>>) -> Result<Image<Luma<S>>, ConvertColorError>
+fn generic_premultiply_lumaa<I, S>(image: &I) -> Result<Image<Luma<S>>, ConvertColorError>
 where
+    I: GenericImage<Pixel = LumaA<S>>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
-    validate_image_dimensions(&image)?;
+    validate_image_dimensions(image)?;
 
     let max_value = S::DEFAULT_MAX_VALUE.into();
 
-    Ok(map_colors(&image, |pixel| {
+    Ok(map_colors(image, |pixel| {
         let LumaA([luminance, alpha]) = pixel;
         let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
         let luminance_f32 = luminance.into();
@@ -129,17 +134,18 @@ where
 }
 
 /// Generic fallback implementation for Rgba -> Rgb conversion with alpha premultiplication
-fn generic_premultiply_rgba<S>(image: Image<Rgba<S>>) -> Result<Image<Rgb<S>>, ConvertColorError>
+fn generic_premultiply_rgba<I, S>(image: &I) -> Result<Image<Rgb<S>>, ConvertColorError>
 where
-    Rgba<S>: Pixel<Subpixel = S>,
+    I: GenericImage<Pixel = Rgba<S>>,
+    I::Pixel: Pixel<Subpixel = S>,
     Rgb<S>: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
 {
-    validate_image_dimensions(&image)?;
+    validate_image_dimensions(image)?;
 
     let max_value = S::DEFAULT_MAX_VALUE.into();
 
-    Ok(map_colors(&image, |pixel| {
+    Ok(map_colors(image, |pixel| {
         let Rgba([red, green, blue, alpha]) = pixel;
         let alpha_normalized = normalize_alpha_with_max(alpha, max_value);
 
@@ -153,7 +159,7 @@ impl AlphaPremultiply for Image<LumaA<f32>> {
     type Output = Image<Luma<f32>>;
 
     fn premultiply_alpha(self) -> Result<Self::Output, ConvertColorError> {
-        generic_premultiply_lumaa(self)
+        generic_premultiply_lumaa(&self)
     }
 }
 
@@ -165,7 +171,7 @@ impl AlphaPremultiply for Image<LumaA<u16>> {
         validate_image_dimensions(&self)?;
 
         let (width, height) = self.dimensions();
-        let mut out: ImageBuffer<Luma<u16>, Vec<u16>> = ImageBuffer::new(width, height);
+        let mut out = ImageBuffer::new(width, height);
 
         // Use direct pixel iterator for better performance
         for (src_pixel, dst_pixel) in self.pixels().zip(out.pixels_mut()) {
@@ -186,7 +192,7 @@ impl AlphaPremultiply for Image<LumaA<u8>> {
         validate_image_dimensions(&self)?;
 
         let (width, height) = self.dimensions();
-        let mut out: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(width, height);
+        let mut out = ImageBuffer::new(width, height);
 
         // Use direct pixel iterator for better performance
         for (src_pixel, dst_pixel) in self.pixels().zip(out.pixels_mut()) {
@@ -204,7 +210,7 @@ impl AlphaPremultiply for Image<Rgba<f32>> {
     type Output = Image<Rgb<f32>>;
 
     fn premultiply_alpha(self) -> Result<Self::Output, ConvertColorError> {
-        generic_premultiply_rgba(self)
+        generic_premultiply_rgba(&self)
     }
 }
 
@@ -216,7 +222,7 @@ impl AlphaPremultiply for Image<Rgba<u8>> {
         validate_image_dimensions(&self)?;
 
         let (width, height) = self.dimensions();
-        let mut out: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(width, height);
+        let mut out = ImageBuffer::new(width, height);
 
         // Use direct pixel iterator for better performance
         for (src_pixel, dst_pixel) in self.pixels().zip(out.pixels_mut()) {
@@ -237,7 +243,7 @@ impl AlphaPremultiply for Image<Rgba<u16>> {
         validate_image_dimensions(&self)?;
 
         let (width, height) = self.dimensions();
-        let mut out: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::new(width, height);
+        let mut out = ImageBuffer::new(width, height);
 
         // Use direct pixel iterator for better performance
         for (src_pixel, dst_pixel) in self.pixels().zip(out.pixels_mut()) {
@@ -262,7 +268,7 @@ impl AlphaPremultiply for Image<Rgba<u32>> {
         validate_image_dimensions(&self)?;
 
         let (width, height) = self.dimensions();
-        let mut out: ImageBuffer<Rgb<u32>, Vec<u32>> = ImageBuffer::new(width, height);
+        let mut out = ImageBuffer::new(width, height);
 
         // Use direct pixel iterator for better performance
         for (src_pixel, dst_pixel) in self.pixels().zip(out.pixels_mut()) {
@@ -464,7 +470,7 @@ const fn fast_premultiply_rgb_u8(channels: [u8; 3], alpha: u8) -> [u8; 3] {
 #[inline]
 fn compute_premultiplied_rgb_pixel<S>(channels: [S; 3], alpha_normalized: f32) -> Rgb<S>
 where
-    S: Into<f32> + Clamp<f32> + Primitive,
+    S: Into<f32> + Clamp<f32>,
 {
     // Direct array construction to avoid intermediate allocations
     let [r, g, b] = channels;
@@ -495,7 +501,7 @@ const fn fast_premultiply_u32(color: u32, alpha: u32) -> u32 {
 /// Validates image dimensions for processing
 fn validate_image_dimensions<I, P>(image: &I) -> Result<(), ConvertColorError>
 where
-    I: GenericImage<Pixel = P>,
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     let (width, height) = image.dimensions();

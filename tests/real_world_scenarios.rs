@@ -4,9 +4,7 @@
 //! testing complete workflows from start to finish.
 
 use image::{Luma, Rgb};
-use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
-};
+use imageops_ai::*;
 
 /// Profile photo processing scenario
 /// Typical workflow: foreground estimation → background removal → padding for profile picture

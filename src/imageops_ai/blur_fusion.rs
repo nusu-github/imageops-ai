@@ -147,11 +147,14 @@
 //! [2] Porter, T., & Duff, T. "Compositing digital images."
 //!     ACM SIGGRAPH Computer Graphics, 1984.
 
-use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable};
-use crate::utils::validate_matching_dimensions;
-use crate::AlphaMaskError;
 use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
+
+use crate::{
+    error::AlphaMaskError,
+    imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable},
+    utils::validate_matching_dimensions,
+};
 
 const CHUNK_SIZE: usize = 8;
 

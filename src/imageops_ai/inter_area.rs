@@ -1,6 +1,7 @@
-use crate::error::ResizeAreaError;
-use image::{ImageBuffer, Pixel, Primitive};
+use image::{GenericImageView, ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
+
+use crate::error::ResizeAreaError;
 
 /// Element of the weight table for area interpolation
 #[derive(Debug, Clone, Copy)]
@@ -112,12 +113,13 @@ fn is_area_fast(src_size: u32, dst_size: u32) -> bool {
 }
 
 /// Fast path implementation for integer scale factors
-fn resize_area_fast<P>(
-    src: &Image<P>,
+fn resize_area_fast<I, P>(
+    src: &I,
     dst_width: u32,
     dst_height: u32,
 ) -> Result<Image<P>, ResizeAreaError>
 where
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
@@ -158,12 +160,13 @@ where
 }
 
 /// General path implementation for non-integer scale factors
-fn resize_area_general<P>(
-    src: &Image<P>,
+fn resize_area_general<I, P>(
+    src: &I,
     dst_width: u32,
     dst_height: u32,
 ) -> Result<Image<P>, ResizeAreaError>
 where
+    I: GenericImageView<Pixel = P>,
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
@@ -251,8 +254,9 @@ where
 
 impl InterAreaResize {
     /// Resize image using INTER_AREA interpolation
-    pub fn resize<P>(&self, src: &Image<P>) -> Result<Image<P>, ResizeAreaError>
+    pub fn resize<I, P>(&self, src: &I) -> Result<Image<P>, ResizeAreaError>
     where
+        I: GenericImageView<Pixel = P>,
         P: Pixel,
         P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
     {

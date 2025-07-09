@@ -1,8 +1,13 @@
-use crate::error::GuidedFilterError;
-use crate::imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable};
 use image::{GenericImage, GenericImageView, ImageBuffer, Luma, Pixel, Primitive, Rgb};
-use imageproc::definitions::Image;
-use imageproc::map::{map_colors, map_colors2, map_pixels, map_subpixels};
+use imageproc::{
+    definitions::Image,
+    map::{map_colors, map_colors2, map_pixels, map_subpixels},
+};
+
+use crate::{
+    error::GuidedFilterError,
+    imageops_ai::box_filter::{BoxFilter, BoxFilterSeparable},
+};
 
 pub trait GuidedFilterExtension<P>
 where

@@ -70,7 +70,7 @@ pub use error::{
 };
 pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ModifyAlpha};
-pub use imageops_ai::blur_fusion::{estimate_foreground, ForegroundEstimator};
+pub use imageops_ai::blur_fusion::ForegroundEstimator;
 pub use imageops_ai::box_filter::{BorderType, BoxFilter, BoxFilterExt};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
 pub use imageops_ai::guided_filter::{
@@ -80,7 +80,7 @@ pub use imageops_ai::guided_filter::{
 pub use imageops_ai::inter_area::{DecimateAlpha, InterAreaExt, InterAreaResize};
 pub use imageops_ai::nlmeans::NLMeans;
 pub use imageops_ai::osbf::{OSBFilter, OSBFilterExt, OneSidedBoxFilter};
-pub use imageops_ai::padding::{add_padding, Padding, Position};
+pub use imageops_ai::padding::{Padding, Position};
 pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 // Re-export imageproc::definitions::Image for convenience

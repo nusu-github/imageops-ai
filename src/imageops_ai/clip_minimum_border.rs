@@ -1,6 +1,7 @@
-use crate::ClipBorderError;
 use image::{GenericImageView, Luma, LumaA, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
+
+use crate::ClipBorderError;
 
 /// Trait for clipping minimum borders from images based on content detection
 ///
@@ -9,7 +10,7 @@ use imageproc::definitions::{Clamp, Image};
 ///
 /// Note: This operation changes the image dimensions, so there is no `_mut` variant
 /// available. The algorithm creates a new image with different dimensions.
-pub trait ClipMinimumBorder<T> {
+pub trait ClipMinimumBorder<S> {
     /// Clips minimum borders from the image based on content detection
     ///
     /// This consumes the original image.
@@ -39,7 +40,7 @@ pub trait ClipMinimumBorder<T> {
     /// # Ok(())
     /// # }
     /// ```
-    fn clip_minimum_border(self, iterations: usize, threshold: T) -> Result<Self, ClipBorderError>
+    fn clip_minimum_border(self, iterations: usize, threshold: S) -> Result<Self, ClipBorderError>
     where
         Self: Sized;
 
@@ -48,7 +49,7 @@ pub trait ClipMinimumBorder<T> {
     fn clip_minimum_border_mut(
         &mut self,
         _iterations: usize,
-        _threshold: T,
+        _threshold: S,
     ) -> Result<&mut Self, ClipBorderError>
     where
         Self: Sized,
@@ -88,9 +89,10 @@ trait ImageProcessing<P: Pixel> {
     ) -> [u32; 4];
 }
 
-impl<P: Pixel> ImageProcessing<P> for Image<P>
+impl<P> ImageProcessing<P> for Image<P>
 where
-    P::Subpixel: Into<f32> + Primitive + Clamp<f32>,
+    P: Pixel,
+    P::Subpixel: Into<f32> + Clamp<f32> + Primitive,
 {
     fn extract_corners(&self) -> [Luma<P::Subpixel>; 4] {
         let (width, height) = self.dimensions();
