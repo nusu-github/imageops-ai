@@ -2,7 +2,11 @@
 //!
 //! This module contains common functionality used across different image operations.
 
+mod array_utils;
 mod unify;
+
+pub use array_utils::{array3_to_image, image_to_array3};
+
 pub use unify::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 use image::Primitive;

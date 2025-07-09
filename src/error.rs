@@ -74,6 +74,19 @@ pub enum AlphaMaskError {
     /// or outside the acceptable range for the operation.
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
+
+    /// Error during box filter operation
+    ///
+    /// This error occurs when a box filter operation fails,
+    /// typically due to invalid parameters or image dimensions.
+    #[error("Box filter operation failed: {0}")]
+    BoxFilterError(BoxFilterError),
+}
+
+impl From<BoxFilterError> for AlphaMaskError {
+    fn from(error: BoxFilterError) -> Self {
+        Self::BoxFilterError(error)
+    }
 }
 
 /// Error type for padding operations
