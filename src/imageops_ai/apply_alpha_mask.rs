@@ -3,16 +3,12 @@ use imageproc::{definitions::Image, map::map_colors2};
 
 use crate::{error::AlphaMaskError, utils::validate_matching_dimensions};
 
-/// Trait providing functionality to apply alpha masks to images
-///
-/// This trait provides functionality to apply grayscale masks to RGB images
-/// to generate RGBA images. This consumes the original image.
-///
-/// Note: This trait performs type conversion (e.g., Rgb -> Rgba). For modifying
-/// existing RGBA images' alpha channel, use the `ModifyAlpha` trait.
-pub trait ApplyAlphaMask {
-    type Mask: GenericImageView<Pixel = Luma<Self::Subpixel>>;
-    type Subpixel: Primitive;
+/// Extension trait providing functionality to apply alpha masks to RGB images
+pub trait ApplyAlphaMask<S>
+where
+    Rgba<S>: Pixel<Subpixel = S>,
+    S: Primitive,
+{
     /// Applies the specified mask to the image and generates an image with alpha channel
     ///
     /// This consumes the original image.
@@ -28,38 +24,31 @@ pub trait ApplyAlphaMask {
     /// # Errors
     ///
     /// * `Error::DimensionMismatch` - When image and mask dimensions don't match
-    /// * `Error::ImageBufferCreationFailed` - When result image creation fails
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ApplyAlphaMask};
+    /// use imageops_ai::ApplyAlphaMask;
     /// use image::{ImageBuffer, Rgb, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// // RGB image and mask must have the same dimensions
-    /// let rgb_image: Image<Rgb<u8>> = ImageBuffer::new(10, 10);
-    /// let mask: Image<Luma<u8>> = ImageBuffer::new(10, 10);
+    /// let rgb_image: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
+    /// let mask: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
     ///
     /// let rgba_image = rgb_image.apply_alpha_mask(&mask)?;
     /// # Ok(())
     /// # }
     /// ```
-    fn apply_alpha_mask(
-        self,
-        mask: &Self::Mask,
-    ) -> Result<Image<Rgba<Self::Subpixel>>, AlphaMaskError>
-    where
-        Rgba<Self::Subpixel>: Pixel<Subpixel = Self::Subpixel>;
+    fn apply_alpha_mask(self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, AlphaMaskError>;
 }
 
-/// Trait for modifying alpha channel of existing RGBA images
-///
-/// This trait provides functionality to replace or modify the alpha channel
-/// of RGBA images while preserving the RGB color channels.
-pub trait ModifyAlpha {
-    type Mask: GenericImageView<Pixel = Luma<Self::Subpixel>>;
-    type Subpixel: Primitive;
+/// Extension trait for modifying alpha channel of existing RGBA images
+pub trait ModifyAlpha<S>
+where
+    Rgba<S>: Pixel<Subpixel = S>,
+    S: Primitive,
+{
     /// Replaces the alpha channel with the provided mask
     ///
     /// This consumes the original image.
@@ -79,20 +68,19 @@ pub trait ModifyAlpha {
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ModifyAlpha};
+    /// use imageops_ai::ModifyAlpha;
     /// use image::{ImageBuffer, Rgba, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let rgba_image: Image<Rgba<u8>> = ImageBuffer::new(10, 10);
-    /// let new_mask: Image<Luma<u8>> = ImageBuffer::new(10, 10);
+    /// let rgba_image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
+    /// let new_mask: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
     ///
     /// let updated = rgba_image.replace_alpha(&new_mask)?;
     /// # Ok(())
     /// # }
     /// ```
-    fn replace_alpha(self, mask: &Self::Mask) -> Result<Self, AlphaMaskError>
+    fn replace_alpha(self, mask: &Image<Luma<S>>) -> Result<Self, AlphaMaskError>
     where
-        Rgba<Self::Subpixel>: Pixel<Subpixel = Self::Subpixel>,
         Self: Sized;
 
     /// Replaces the alpha channel with the provided mask in-place
@@ -112,35 +100,27 @@ pub trait ModifyAlpha {
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ModifyAlpha};
+    /// use imageops_ai::ModifyAlpha;
     /// use image::{ImageBuffer, Rgba, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut rgba_image: Image<Rgba<u8>> = ImageBuffer::new(10, 10);
-    /// let new_mask: Image<Luma<u8>> = ImageBuffer::new(10, 10);
+    /// let mut rgba_image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
+    /// let new_mask: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(10, 10);
     ///
     /// rgba_image.replace_alpha_mut(&new_mask)?;
     /// # Ok(())
     /// # }
     /// ```
-    fn replace_alpha_mut(&mut self, mask: &Self::Mask) -> Result<&mut Self, AlphaMaskError>;
+    fn replace_alpha_mut(&mut self, mask: &Image<Luma<S>>) -> Result<&mut Self, AlphaMaskError>;
 }
 
-impl<S> ApplyAlphaMask for Image<Rgb<S>>
+impl<S> ApplyAlphaMask<S> for Image<Rgb<S>>
 where
     Rgb<S>: Pixel<Subpixel = S>,
+    Rgba<S>: Pixel<Subpixel = S>,
     S: Primitive,
 {
-    type Mask = Image<Luma<S>>;
-    type Subpixel = S;
-
-    fn apply_alpha_mask(
-        self,
-        mask: &Self::Mask,
-    ) -> Result<Image<Rgba<Self::Subpixel>>, AlphaMaskError>
-    where
-        Rgba<Self::Subpixel>: Pixel<Subpixel = Self::Subpixel>,
-    {
+    fn apply_alpha_mask(self, mask: &Image<Luma<S>>) -> Result<Image<Rgba<S>>, AlphaMaskError> {
         validate_dimensions(&self, mask)?;
 
         let result = map_colors2(&self, mask, |Rgb([red, green, blue]), Luma([alpha])| {
@@ -151,15 +131,12 @@ where
     }
 }
 
-impl<S> ModifyAlpha for Image<Rgba<S>>
+impl<S> ModifyAlpha<S> for Image<Rgba<S>>
 where
     Rgba<S>: Pixel<Subpixel = S>,
     S: Primitive,
 {
-    type Mask = Image<Luma<S>>;
-    type Subpixel = S;
-
-    fn replace_alpha(self, mask: &Self::Mask) -> Result<Self, AlphaMaskError> {
+    fn replace_alpha(self, mask: &Image<Luma<S>>) -> Result<Self, AlphaMaskError> {
         validate_dimensions(&self, mask)?;
 
         let result = map_colors2(&self, mask, |Rgba([red, green, blue, _]), Luma([alpha])| {
@@ -169,7 +146,7 @@ where
         Ok(result)
     }
 
-    fn replace_alpha_mut(&mut self, mask: &Self::Mask) -> Result<&mut Self, AlphaMaskError> {
+    fn replace_alpha_mut(&mut self, mask: &Image<Luma<S>>) -> Result<&mut Self, AlphaMaskError> {
         validate_dimensions(self, mask)?;
 
         self.pixels_mut()
@@ -183,7 +160,6 @@ where
     }
 }
 
-/// Function to validate dimensions
 #[inline]
 fn validate_dimensions<I1, I2, P1, P2, S>(image: &I1, mask: &I2) -> Result<(), AlphaMaskError>
 where
@@ -234,7 +210,7 @@ mod tests {
         mask.put_pixel(0, 1, Luma([64]));
         mask.put_pixel(1, 1, Luma([0]));
 
-        let result = ApplyAlphaMask::apply_alpha_mask(image, &mask).unwrap();
+        let result = image.apply_alpha_mask(&mask).unwrap();
 
         assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
@@ -244,8 +220,6 @@ mod tests {
 
     #[test]
     fn test_modify_alpha() {
-        use crate::ModifyAlpha;
-
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         let mut mask: Image<Luma<u8>> = Image::new(2, 2);
 
@@ -261,7 +235,6 @@ mod tests {
 
         let result = image.replace_alpha(&mask).unwrap();
 
-        // Color channels should remain unchanged, only alpha is replaced
         assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
         assert_eq!(result.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
@@ -270,8 +243,6 @@ mod tests {
 
     #[test]
     fn test_modify_alpha_mut() {
-        use crate::ModifyAlpha;
-
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         let mut mask: Image<Luma<u8>> = Image::new(2, 2);
 
@@ -283,7 +254,6 @@ mod tests {
 
         image.replace_alpha_mut(&mask).unwrap();
 
-        // Color channels should remain unchanged, only alpha is replaced
         assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert_eq!(image.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
     }

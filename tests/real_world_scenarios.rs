@@ -76,7 +76,7 @@ fn test_profile_photo_processing_workflow() {
     // Step 3: Make square for profile picture (300x300)
     // Note: We premultiply alpha first, which makes transparent areas black
     let rgb_cutout = cutout
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     let (square_profile, position) = rgb_cutout
@@ -225,7 +225,7 @@ fn test_product_photo_background_removal() {
 
     // Step 3: Clip minimum border to remove excess whitespace
     let clipped = product_cutout
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Premultiplication should succeed");
 
     // Note: ClipMinimumBorder might not work well with our test data

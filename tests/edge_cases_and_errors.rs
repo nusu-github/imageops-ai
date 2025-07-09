@@ -5,8 +5,8 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaMaskError, AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding,
-    PaddingError, Position,
+    AlphaMaskError, ApplyAlphaMask, ForegroundEstimatorExt, Image, PadExt, PaddingError, Position,
+    PremultiplyAlpha, PremultiplyAlphaAndDrop,
 };
 
 /// Helper to create minimal 1x1 image
@@ -92,7 +92,7 @@ fn test_premultiply_extreme_values() {
                                                        // Test with mid alpha
     image.put_pixel(2, 0, Rgba([255, 255, 255, 128])); // White and semi-transparent
 
-    let result = image.premultiply_alpha().unwrap();
+    let result = image.premultiply_alpha_and_drop().unwrap();
 
     // Zero alpha should produce black
     let zero_alpha_pixel = result.get_pixel(0, 0);
@@ -222,13 +222,13 @@ fn test_all_padding_positions_edge_cases() {
 
     let positions = [
         (Position::TopLeft, (0, 0)),
-        (Position::Top, (1, 0)),
+        (Position::TopCenter, (1, 0)),
         (Position::TopRight, (2, 0)),
         (Position::Left, (0, 1)),
         (Position::Center, (1, 1)),
         (Position::Right, (2, 1)),
         (Position::BottomLeft, (0, 2)),
-        (Position::Bottom, (1, 2)),
+        (Position::BottomCenter, (1, 2)),
         (Position::BottomRight, (2, 2)),
     ];
 
@@ -318,7 +318,7 @@ fn test_complex_workflow_edge_cases() {
         .expect("Alpha mask should work");
 
     let premultiplied = with_alpha
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Premultiplication should work");
 
     let (final_result, _) = premultiplied
@@ -386,7 +386,7 @@ fn test_numerical_precision_edge_cases() {
     image.put_pixel(1, 0, Rgba([254, 254, 254, 254])); // Near-maximum values
     image.put_pixel(2, 0, Rgba([127, 128, 129, 127])); // Around midpoint
 
-    let result = image.premultiply_alpha();
+    let result = image.premultiply_alpha_and_drop();
     assert!(result.is_ok());
 
     // All results should be valid RGB values

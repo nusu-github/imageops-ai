@@ -116,7 +116,8 @@ impl OSBFRegions {
 fn osbf_iteration<P>(image: &Image<P>, radius: u32) -> Result<Image<P>, OSBFilterError>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     let (width, height) = image.dimensions();
     let channels = P::CHANNEL_COUNT as usize;
@@ -144,7 +145,7 @@ where
             let diag_idx = (y as usize) * integral_width + (x as usize);
 
             for c in 0..channels {
-                let val: f32 = pixel_channels[c].into();
+                let val = f32::from(pixel_channels[c]);
                 let base_offset = c * integral_size;
 
                 channel_integrals[base_offset + current_idx] = val
@@ -177,7 +178,7 @@ where
         pixel_data.clear();
 
         for c in 0..channels {
-            let current_val: f32 = current_channels[c].into();
+            let current_val = f32::from(current_channels[c]);
             let mut min_diff = f32::INFINITY;
             let mut best_val = current_val;
 
@@ -217,7 +218,8 @@ where
 impl<P> OSBFilter<P> for OneSidedBoxFilter
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn filter(&self, image: &Image<P>, iterations: u32) -> Result<Image<P>, OSBFilterError> {
         let (width, height) = image.dimensions();
@@ -269,7 +271,8 @@ where
 impl<P> OSBFilterExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn osbf(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError> {
         let filter = OneSidedBoxFilter::new(radius)?;

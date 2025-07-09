@@ -155,13 +155,14 @@ fn validate_parameters(
 #[inline]
 fn patch_distance<T>(patch1: &[T], patch2: &[T]) -> f32
 where
-    T: Primitive + Into<f32>,
+    T: Primitive,
+    f32: From<T>,
 {
     patch1
         .iter()
         .zip(patch2.iter())
         .map(|(&p1, &p2)| {
-            let diff = p1.into() - p2.into();
+            let diff = f32::from(p1) - f32::from(p2);
             diff * diff
         })
         .sum()
@@ -515,7 +516,8 @@ where
 
 impl<T> NLMeans<T> for Image<Luma<T>>
 where
-    T: Primitive + Into<f32> + Clamp<f32>,
+    T: Primitive + Clamp<f32>,
+    f32: From<T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
@@ -573,7 +575,8 @@ where
                         let weight = f32::exp(-distance / nw);
 
                         // Get neighbor pixel value
-                        let neighbor_value = padded_image[(ny * padded_width + nx) as usize].into();
+                        let neighbor_value =
+                            f32::from(padded_image[(ny * padded_width + nx) as usize]);
 
                         weighted_sum += weight * neighbor_value;
                         weight_sum += weight;
@@ -584,7 +587,7 @@ where
                 let new_value = if weight_sum > 0.0 {
                     weighted_sum / weight_sum
                 } else {
-                    self.get_pixel(x, y).0[0].into()
+                    f32::from(self.get_pixel(x, y).0[0])
                 };
 
                 // Clamp to valid range and convert back to T
@@ -657,7 +660,8 @@ where
                         let weight = f32::exp(-distance / nw);
 
                         // Get neighbor pixel value
-                        let neighbor_value = padded_image[(ny * padded_width + nx) as usize].into();
+                        let neighbor_value =
+                            f32::from(padded_image[(ny * padded_width + nx) as usize]);
 
                         weighted_sum += weight * neighbor_value;
                         weight_sum += weight;
@@ -668,7 +672,7 @@ where
                 let new_value = if weight_sum > 0.0 {
                     weighted_sum / weight_sum
                 } else {
-                    self.get_pixel(x, y).0[0].into()
+                    f32::from(self.get_pixel(x, y).0[0])
                 };
 
                 // Clamp to valid range and convert back to T
@@ -692,8 +696,9 @@ where
 
 impl<T> NLMeans<T> for Image<Rgb<T>>
 where
-    T: Primitive + Into<f32> + Clamp<f32>,
+    T: Primitive + Clamp<f32>,
     Rgb<T>: Pixel<Subpixel = T>,
+    f32: From<T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
@@ -752,9 +757,9 @@ where
 
                         // Get neighbor pixel values (RGB)
                         let neighbor_base = (ny * padded_width + nx) as usize * 3;
-                        let neighbor_r = padded_image[neighbor_base].into();
-                        let neighbor_g = padded_image[neighbor_base + 1].into();
-                        let neighbor_b = padded_image[neighbor_base + 2].into();
+                        let neighbor_r = f32::from(padded_image[neighbor_base]);
+                        let neighbor_g = f32::from(padded_image[neighbor_base + 1]);
+                        let neighbor_b = f32::from(padded_image[neighbor_base + 2]);
 
                         weighted_sum[0] += weight * neighbor_r;
                         weighted_sum[1] += weight * neighbor_g;
@@ -773,9 +778,9 @@ where
                 } else {
                     let orig_pixel = self.get_pixel(x, y);
                     [
-                        orig_pixel.0[0].into(),
-                        orig_pixel.0[1].into(),
-                        orig_pixel.0[2].into(),
+                        f32::from(orig_pixel.0[0]),
+                        f32::from(orig_pixel.0[1]),
+                        f32::from(orig_pixel.0[2]),
                     ]
                 };
 
@@ -802,8 +807,9 @@ where
 
 impl<T> NLMeans<T> for Image<Rgba<T>>
 where
-    T: Primitive + Into<f32> + Clamp<f32>,
+    T: Primitive + Clamp<f32>,
     Rgba<T>: Pixel<Subpixel = T>,
+    f32: From<T>,
 {
     fn nl_means(self, h: f32, small_window: u32, big_window: u32) -> Result<Self, NLMeansError> {
         let (width, height) = self.dimensions();
@@ -862,10 +868,10 @@ where
 
                         // Get neighbor pixel values (RGBA)
                         let neighbor_base = (ny * padded_width + nx) as usize * 4;
-                        let neighbor_r = padded_image[neighbor_base].into();
-                        let neighbor_g = padded_image[neighbor_base + 1].into();
-                        let neighbor_b = padded_image[neighbor_base + 2].into();
-                        let neighbor_a = padded_image[neighbor_base + 3].into();
+                        let neighbor_r = f32::from(padded_image[neighbor_base]);
+                        let neighbor_g = f32::from(padded_image[neighbor_base + 1]);
+                        let neighbor_b = f32::from(padded_image[neighbor_base + 2]);
+                        let neighbor_a = f32::from(padded_image[neighbor_base + 3]);
 
                         weighted_sum[0] += weight * neighbor_r;
                         weighted_sum[1] += weight * neighbor_g;
@@ -886,10 +892,10 @@ where
                 } else {
                     let orig_pixel = self.get_pixel(x, y);
                     [
-                        orig_pixel.0[0].into(),
-                        orig_pixel.0[1].into(),
-                        orig_pixel.0[2].into(),
-                        orig_pixel.0[3].into(),
+                        f32::from(orig_pixel.0[0]),
+                        f32::from(orig_pixel.0[1]),
+                        f32::from(orig_pixel.0[2]),
+                        f32::from(orig_pixel.0[3]),
                     ]
                 };
 

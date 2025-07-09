@@ -16,7 +16,7 @@
 //! ## Example Usage
 //!
 //! ```no_run
-//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, Padding, BoxFilterExt, OSBFilterExt, InterAreaExt};
+//! use imageops_ai::{AlphaPremultiply, ApplyAlphaMask, Position, PadExt, BoxFilterExt, OSBFilterExt, InterAreaExt};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Rgba, Luma};
 //!
@@ -68,19 +68,19 @@ pub use error::{
     AlphaMaskError, BoxFilterError, ClipBorderError, ConvertColorError, GuidedFilterError,
     NLMeansError, OSBFilterError, PaddingError, ResizeAreaError,
 };
-pub use imageops_ai::alpha_premultiply::{AlphaPremultiply, PremultiplyAlphaInPlace};
+pub use imageops_ai::alpha_premultiply::{PremultiplyAlpha, PremultiplyAlphaAndDrop};
 pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMask, ModifyAlpha};
-pub use imageops_ai::blur_fusion::ForegroundEstimator;
+pub use imageops_ai::blur_fusion::ForegroundEstimatorExt;
 pub use imageops_ai::box_filter::{BorderType, BoxFilter, BoxFilterExt};
 pub use imageops_ai::clip_minimum_border::ClipMinimumBorder;
 pub use imageops_ai::guided_filter::{
     FastGuidedFilterImpl, GuidedFilterColor, GuidedFilterExtension, GuidedFilterGray,
     GuidedFilterWithColorGuidance,
 };
-pub use imageops_ai::inter_area::{DecimateAlpha, InterAreaExt, InterAreaResize};
+pub use imageops_ai::inter_area::{InterAreaExt, InterAreaResize};
 pub use imageops_ai::nlmeans::NLMeans;
 pub use imageops_ai::osbf::{OSBFilter, OSBFilterExt, OneSidedBoxFilter};
-pub use imageops_ai::padding::{Padding, Position};
+pub use imageops_ai::padding::{PadExt, Position};
 pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 // Re-export imageproc::definitions::Image for convenience

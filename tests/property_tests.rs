@@ -4,9 +4,7 @@
 //! that should hold for all possible inputs to our image operations.
 
 use image::{Luma, Rgb, Rgba};
-use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
-};
+use imageops_ai::{ApplyAlphaMask, ForegroundEstimatorExt, Image, PadExt, Position, PremultiplyAlpha};
 use proptest::prelude::*;
 
 /// Strategy for generating small but valid image dimensions
@@ -38,8 +36,8 @@ fn alpha_pixel() -> impl Strategy<Value = Luma<u8>> {
 /// Strategy for generating padding positions
 fn padding_position() -> impl Strategy<Value = Position> {
     prop_oneof![
-        Just(Position::Top),
-        Just(Position::Bottom),
+        Just(Position::TopCenter),
+        Just(Position::BottomCenter),
         Just(Position::Left),
         Just(Position::Right),
         Just(Position::TopLeft),

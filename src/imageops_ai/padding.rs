@@ -1,4 +1,4 @@
-use image::{GenericImage, GenericImageView, ImageBuffer, Pixel};
+use image::{GenericImageView, ImageBuffer, Pixel};
 use imageproc::definitions::Image;
 
 use crate::error::PaddingError;
@@ -7,9 +7,9 @@ use crate::error::PaddingError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Position {
     /// Top center
-    Top,
+    TopCenter,
     /// Bottom center
-    Bottom,
+    BottomCenter,
     /// Left center
     Left,
     /// Right center
@@ -26,12 +26,12 @@ pub enum Position {
     Center,
 }
 
-/// Calculate position from image size and padding size
+/// Calculate offset from image size and canvas size
 ///
 /// # Arguments
 ///
-/// * `size` - Original image size (width, height)
-/// * `pad_size` - Padded size (width, height)
+/// * `img_size` - Original image size (width, height)
+/// * `canvas_size` - Canvas size (width, height)
 /// * `position` - Padding position
 ///
 /// # Returns
@@ -41,43 +41,49 @@ pub enum Position {
 /// # Errors
 ///
 /// * Returns error when padding size is smaller than original image size
-pub fn calculate_position(
-    size: (u32, u32),
-    pad_size: (u32, u32),
+pub fn calc_offset(
+    img_size: (u32, u32),
+    canvas_size: (u32, u32),
     position: Position,
 ) -> Result<(i64, i64), PaddingError> {
-    let (width, height) = size;
-    let (pad_width, pad_height) = pad_size;
+    let (width, height) = img_size;
+    let (canvas_width, canvas_height) = canvas_size;
 
-    if pad_width < width {
-        return Err(PaddingError::PaddingWidthTooSmall { width, pad_width });
+    if canvas_width < width {
+        return Err(PaddingError::PaddingWidthTooSmall {
+            width,
+            pad_width: canvas_width,
+        });
     }
 
-    if pad_height < height {
-        return Err(PaddingError::PaddingHeightTooSmall { height, pad_height });
+    if canvas_height < height {
+        return Err(PaddingError::PaddingHeightTooSmall {
+            height,
+            pad_height: canvas_height,
+        });
     }
 
     let (x, y) = match position {
-        Position::Top => ((pad_width - width) / 2, 0),
-        Position::Bottom => ((pad_width - width) / 2, pad_height - height),
-        Position::Left => (0, (pad_height - height) / 2),
-        Position::Right => (pad_width - width, (pad_height - height) / 2),
+        Position::TopCenter => ((canvas_width - width) / 2, 0),
+        Position::BottomCenter => ((canvas_width - width) / 2, canvas_height - height),
+        Position::Left => (0, (canvas_height - height) / 2),
+        Position::Right => (canvas_width - width, (canvas_height - height) / 2),
         Position::TopLeft => (0, 0),
-        Position::TopRight => (pad_width - width, 0),
-        Position::BottomLeft => (0, pad_height - height),
-        Position::BottomRight => (pad_width - width, pad_height - height),
-        Position::Center => ((pad_width - width) / 2, (pad_height - height) / 2),
+        Position::TopRight => (canvas_width - width, 0),
+        Position::BottomLeft => (0, canvas_height - height),
+        Position::BottomRight => (canvas_width - width, canvas_height - height),
+        Position::Center => ((canvas_width - width) / 2, (canvas_height - height) / 2),
     };
 
     Ok((x.into(), y.into()))
 }
 
-/// Add padding with specified size and position (function-based implementation)
+/// Pad image with specified size and position (function-based implementation)
 ///
 /// # Arguments
 ///
 /// * `image` - Original image
-/// * `pad_size` - Padded size (width, height)
+/// * `canvas_size` - Canvas size (width, height)
 /// * `position` - Padding position
 /// * `color` - Padding color
 ///
@@ -85,19 +91,9 @@ pub fn calculate_position(
 ///
 /// Padded image
 ///
-/// # Examples
-/// ```
-/// use image::{Rgb, RgbImage};
-/// use imageproc::definitions::Image;
-/// use imageops_ai::{add_padding, Position};
-///
-/// let image: RgbImage = RgbImage::new(10, 10);
-/// let padded = add_padding(&image, (20, 20), Position::Center, Rgb([255, 255, 255])).unwrap();
-/// assert_eq!(padded.dimensions(), (20, 20));
-/// ```
-pub fn add_padding<I, P>(
+pub fn pad_image<I, P>(
     image: &I,
-    pad_size: (u32, u32),
+    canvas_size: (u32, u32),
     position: Position,
     color: P,
 ) -> Result<Image<P>, PaddingError>
@@ -106,144 +102,60 @@ where
     P: Pixel,
 {
     let (width, height) = image.dimensions();
-    let (x, y) = calculate_position((width, height), pad_size, position)?;
-    let (pad_width, pad_height) = pad_size;
+    let (x, y) = calc_offset((width, height), canvas_size, position)?;
+    let (canvas_width, canvas_height) = canvas_size;
 
-    // Memory-optimized buffer allocation
-    let mut out = create_optimized_buffer(pad_width, pad_height, color);
+    // Create buffer filled with padding color
+    let mut out = ImageBuffer::from_pixel(canvas_width, canvas_height, color);
 
-    // High-performance image copying with multiple optimization strategies
-    copy_image_optimized(image, &mut out, x, y, width, height);
+    // Iterator-based image copying following guidelines
+    blit(image, &mut out, x, y, width, height);
 
     Ok(out)
 }
 
-/// Optimized image copying function using multiple strategies
+/// Iterator-based image copying
 ///
-/// This function applies several optimization techniques:
-/// 1. Row-based bulk copying when memory layout allows
-/// 2. Iterator-based processing with bounds check elision
-/// 3. Cache-friendly access patterns
+/// This function uses safe iterator-based processing:
+/// 1. Utilizes iterator chains for memory-efficient processing
+/// 2. Avoids manual loops as per guidelines
+/// 3. Uses safe pixel access methods
 #[inline]
-fn copy_image_optimized<I, P>(
-    src: &I,
-    dst: &mut Image<P>,
-    offset_x: i64,
-    offset_y: i64,
-    width: u32,
-    height: u32,
-) where
-    I: GenericImageView<Pixel = P>,
-    P: Pixel,
-{
-    let dst_x_start = offset_x as u32;
-    let dst_y_start = offset_y as u32;
-
-    // Strategy 1: Try row-wise bulk copy for contiguous memory when possible
-    // This works when both source and destination have same width and
-    // we're copying complete rows
-    if can_use_bulk_copy(src, dst, dst_x_start, width) {
-        copy_rows_bulk(src, dst, dst_x_start, dst_y_start, width, height);
-        return;
-    }
-
-    // Strategy 2: Row-by-row iterator processing (cache-friendly)
-    (0..height).for_each(|src_y| {
-        let dst_y = dst_y_start + src_y;
-        (0..width).for_each(|src_x| {
-            let dst_x = dst_x_start + src_x;
-
-            // Safety: Bounds validated by calculate_position
-            unsafe {
-                let pixel = src.unsafe_get_pixel(src_x, src_y);
-                dst.unsafe_put_pixel(dst_x, dst_y, pixel);
-            }
-        });
-    });
-}
-
-/// Check if bulk copying is possible based on memory layout
-#[inline]
-const fn can_use_bulk_copy<I, P>(_src: &I, _dst: &Image<P>, dst_x_start: u32, width: u32) -> bool
+fn blit<I, P>(src: &I, dst: &mut Image<P>, x_off: i64, y_off: i64, width: u32, height: u32)
 where
     I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
-    // Bulk copy is efficient when:
-    // 1. Copying starts at the beginning of destination rows (x offset = 0)
-    // 2. Source width matches copy width (copying complete rows)
-    dst_x_start == 0 && width > 64 // Only worthwhile for larger widths
-}
+    let dst_x_start = x_off as u32;
+    let dst_y_start = y_off as u32;
 
-/// Bulk copy complete rows for maximum performance
-#[inline]
-fn copy_rows_bulk<I, P>(
-    src: &I,
-    dst: &mut Image<P>,
-    dst_x_start: u32,
-    dst_y_start: u32,
-    width: u32,
-    height: u32,
-) where
-    I: GenericImageView<Pixel = P>,
-    P: Pixel,
-{
-    // For now, fall back to optimized pixel-by-pixel copy
-    // Future: Implement actual bulk memory copy when ImageBuffer exposes raw access
-    (0..height).for_each(|src_y| {
-        let dst_y = dst_y_start + src_y;
-        (0..width).for_each(|src_x| {
-            let dst_x = dst_x_start + src_x;
-
-            unsafe {
-                let pixel = src.unsafe_get_pixel(src_x, src_y);
-                dst.unsafe_put_pixel(dst_x, dst_y, pixel);
-            }
+    // Iterator-based pixel copying using safe methods
+    (0..height)
+        .flat_map(|src_y| {
+            let dst_y = dst_y_start + src_y;
+            (0..width).map(move |src_x| {
+                let dst_x = dst_x_start + src_x;
+                (src_x, src_y, dst_x, dst_y)
+            })
+        })
+        .for_each(|(src_x, src_y, dst_x, dst_y)| {
+            let pixel = src.get_pixel(src_x, src_y);
+            dst.put_pixel(dst_x, dst_y, pixel);
         });
-    });
 }
 
-/// Create memory-optimized buffer with pre-allocated capacity
-///
-/// This function optimizes memory allocation by:
-/// 1. Pre-calculating exact capacity requirements
-/// 2. Using efficient fill patterns
-/// 3. Minimizing allocation overhead
-#[inline]
-fn create_optimized_buffer<P>(width: u32, height: u32, fill_color: P) -> Image<P>
-where
-    P: Pixel,
-{
-    let total_pixels = (width as usize) * (height as usize);
-    let subpixels_per_pixel = P::CHANNEL_COUNT as usize;
-    let total_subpixels = total_pixels * subpixels_per_pixel;
-
-    // Pre-allocate with exact capacity to avoid reallocations
-    let mut buffer = Vec::with_capacity(total_subpixels);
-
-    // Fill buffer efficiently using iterator repeat
-    let fill_channels = fill_color.channels();
-    for _ in 0..total_pixels {
-        buffer.extend_from_slice(fill_channels);
-    }
-
-    // Safety: We've filled exactly the required number of elements
-    ImageBuffer::from_raw(width, height, buffer)
-        .expect("Buffer size calculation error - this should not happen")
-}
-
-/// Trait that provides padding operations
+/// Extension trait that provides padding operations
 ///
 /// Note: This operation changes the image dimensions, so there is no `_mut` variant
 /// available. The algorithm creates a new image with different dimensions.
-pub trait Padding<P: Pixel> {
+pub trait PadExt<P: Pixel> {
     /// Add padding with specified size and position
     ///
     /// This consumes the original image.
     ///
     /// # Arguments
     ///
-    /// * `pad_size` - Padded size (width, height)
+    /// * `canvas_size` - Canvas size (width, height)
     /// * `position` - Padding position
     /// * `color` - Padding color
     ///
@@ -253,7 +165,7 @@ pub trait Padding<P: Pixel> {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::{Padding, Position, Image};
+    /// use imageops_ai::{PadExt, Position, Image};
     /// use image::Rgb;
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -264,7 +176,7 @@ pub trait Padding<P: Pixel> {
     /// ```
     fn add_padding(
         self,
-        pad_size: (u32, u32),
+        canvas_size: (u32, u32),
         position: Position,
         color: P,
     ) -> Result<(Self, (i64, i64)), PaddingError>
@@ -291,7 +203,7 @@ pub trait Padding<P: Pixel> {
     /// This is a helper method that doesn't consume self.
     fn calculate_padding_position(
         &self,
-        pad_size: (u32, u32),
+        canvas_size: (u32, u32),
         position: Position,
     ) -> Result<(i64, i64), PaddingError>;
 
@@ -300,66 +212,64 @@ pub trait Padding<P: Pixel> {
     /// This is a helper method that doesn't consume self.
     fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError>;
 
-    /// Hidden _mut variant that is not available for this operation
+    /// This mut variant is not available - DO NOT USE
     #[doc(hidden)]
-    fn add_padding_mut(
+    fn pad_mut(
         &mut self,
-        _pad_size: (u32, u32),
+        _canvas_size: (u32, u32),
         _position: Position,
         _color: P,
     ) -> Result<&mut Self, PaddingError> {
-        unimplemented!(
-            "add_padding_mut is not available because the operation changes image dimensions"
-        )
+        unimplemented!("pad_mut is not available because the operation changes image dimensions")
     }
 
-    /// Hidden _mut variant that is not available for this operation
+    /// This mut variant is not available - DO NOT USE
     #[doc(hidden)]
-    fn add_padding_square_mut(&mut self, _color: P) -> Result<&mut Self, PaddingError> {
+    fn pad_square_mut(&mut self, _color: P) -> Result<&mut Self, PaddingError> {
         unimplemented!(
-            "add_padding_square_mut is not available because the operation changes image dimensions"
+            "pad_square_mut is not available because the operation changes image dimensions"
         )
     }
 }
 
-impl<P: Pixel> Padding<P> for Image<P> {
+impl<P: Pixel> PadExt<P> for Image<P> {
     fn add_padding(
         self,
-        pad_size: (u32, u32),
+        canvas_size: (u32, u32),
         position: Position,
         color: P,
     ) -> Result<(Self, (i64, i64)), PaddingError> {
         let (width, height) = self.dimensions();
-        let pos = calculate_position((width, height), pad_size, position)?;
-        let padded = add_padding(&self, pad_size, position, color)?;
+        let pos = calc_offset((width, height), canvas_size, position)?;
+        let padded = pad_image(&self, canvas_size, position, color)?;
         Ok((padded, pos))
     }
 
     fn add_padding_square(self, color: P) -> Result<(Self, (i64, i64)), PaddingError> {
-        let ((_x, _y), pad_size) = self.calculate_square_padding()?;
-        self.add_padding(pad_size, Position::Center, color)
+        let ((_x, _y), canvas_size) = self.calculate_square_padding()?;
+        self.add_padding(canvas_size, Position::Center, color)
     }
 
     fn calculate_padding_position(
         &self,
-        pad_size: (u32, u32),
+        canvas_size: (u32, u32),
         position: Position,
     ) -> Result<(i64, i64), PaddingError> {
         let (width, height) = self.dimensions();
-        calculate_position((width, height), pad_size, position)
+        calc_offset((width, height), canvas_size, position)
     }
 
     fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError> {
         let (width, height) = self.dimensions();
 
-        let pad_size = if width > height {
+        let canvas_size = if width > height {
             (width, width)
         } else {
             (height, height)
         };
 
-        self.calculate_padding_position(pad_size, Position::Center)
-            .map(|(x, y)| ((x, y), pad_size))
+        self.calculate_padding_position(canvas_size, Position::Center)
+            .map(|(x, y)| ((x, y), canvas_size))
     }
 }
 
@@ -370,42 +280,42 @@ mod tests {
     use image::Rgb;
 
     #[test]
-    fn test_calculate_position() {
+    fn test_calc_offset() {
         // Test center position
-        let pos = calculate_position((10, 10), (20, 20), Position::Center);
+        let pos = calc_offset((10, 10), (20, 20), Position::Center);
         assert_eq!(pos, Ok((5, 5)));
 
         // Test top-left position
-        let pos = calculate_position((10, 10), (20, 20), Position::TopLeft);
+        let pos = calc_offset((10, 10), (20, 20), Position::TopLeft);
         assert_eq!(pos, Ok((0, 0)));
 
         // Test top-right position
-        let pos = calculate_position((10, 10), (20, 20), Position::TopRight);
+        let pos = calc_offset((10, 10), (20, 20), Position::TopRight);
         assert_eq!(pos, Ok((10, 0)));
 
         // Test bottom-left position
-        let pos = calculate_position((10, 10), (20, 20), Position::BottomLeft);
+        let pos = calc_offset((10, 10), (20, 20), Position::BottomLeft);
         assert_eq!(pos, Ok((0, 10)));
 
         // Test bottom-right position
-        let pos = calculate_position((10, 10), (20, 20), Position::BottomRight);
+        let pos = calc_offset((10, 10), (20, 20), Position::BottomRight);
         assert_eq!(pos, Ok((10, 10)));
     }
 
     #[test]
     fn test_add_padding_function() {
-        let image = create_test_rgb_image(); // 2x2 image
+        let src_img = create_test_rgb_image(); // 2x2 image
         let fill_color = Rgb([255, 255, 255]); // White
 
         // Test padding to larger size
-        let result = add_padding(&image, (4, 4), Position::Center, fill_color);
+        let result = pad_image(&src_img, (4, 4), Position::Center, fill_color);
         assert!(result.is_ok());
 
         let padded = result.unwrap();
         assert_eq!(padded.dimensions(), (4, 4));
 
         // Test invalid padding (smaller than original)
-        let result = add_padding(&image, (1, 1), Position::Center, fill_color);
+        let result = pad_image(&src_img, (1, 1), Position::Center, fill_color);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -415,17 +325,17 @@ mod tests {
 
     #[test]
     fn test_padding_trait() {
-        let image = create_test_rgb_image(); // 2x2 image
+        let src_img = create_test_rgb_image(); // 2x2 image
         let fill_color = Rgb([255, 255, 255]); // White
 
         // Store original pixels before moving image
-        let orig_00 = *image.get_pixel(0, 0);
-        let orig_10 = *image.get_pixel(1, 0);
-        let orig_01 = *image.get_pixel(0, 1);
-        let orig_11 = *image.get_pixel(1, 1);
+        let orig_00 = *src_img.get_pixel(0, 0);
+        let orig_10 = *src_img.get_pixel(1, 0);
+        let orig_01 = *src_img.get_pixel(0, 1);
+        let orig_11 = *src_img.get_pixel(1, 1);
 
         // Test regular padding
-        let result = image.add_padding((4, 4), Position::TopLeft, fill_color);
+        let result = src_img.add_padding((4, 4), Position::TopLeft, fill_color);
         assert!(result.is_ok());
 
         let (padded, pos) = result.unwrap();
@@ -442,14 +352,14 @@ mod tests {
     #[test]
     fn test_square_padding() {
         // Test rectangular image (width > height)
-        let mut image: Image<Rgb<u8>> = Image::new(6, 4);
+        let mut rect_img: Image<Rgb<u8>> = Image::new(6, 4);
         for y in 0..4 {
             for x in 0..6 {
-                image.put_pixel(x, y, Rgb([100, 150, 200]));
+                rect_img.put_pixel(x, y, Rgb([100, 150, 200]));
             }
         }
 
-        let result = image.add_padding_square(Rgb([255, 255, 255]));
+        let result = rect_img.add_padding_square(Rgb([255, 255, 255]));
         assert!(result.is_ok());
 
         let (padded, pos) = result.unwrap();
@@ -457,8 +367,8 @@ mod tests {
         assert_eq!(pos, (0, 1)); // Centered vertically
 
         // Test square image (no padding needed)
-        let square_image: Image<Rgb<u8>> = Image::new(4, 4);
-        let result = square_image.add_padding_square(Rgb([255, 255, 255]));
+        let square_img: Image<Rgb<u8>> = Image::new(4, 4);
+        let result = square_img.add_padding_square(Rgb([255, 255, 255]));
         assert!(result.is_ok());
 
         let (padded, pos) = result.unwrap();
@@ -468,10 +378,10 @@ mod tests {
 
     #[test]
     fn test_calculate_padding_position_errors() {
-        let image = create_test_rgb_image(); // 2x2 image
+        let src_img = create_test_rgb_image(); // 2x2 image
 
         // Test padding size too small (width)
-        let result = image.calculate_padding_position((1, 4), Position::Center);
+        let result = src_img.calculate_padding_position((1, 4), Position::Center);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -479,7 +389,7 @@ mod tests {
         ));
 
         // Test padding size too small (height)
-        let result = image.calculate_padding_position((4, 1), Position::Center);
+        let result = src_img.calculate_padding_position((4, 1), Position::Center);
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -489,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_padding_position_calculation() {
-        let image = create_test_rgb_image(); // 2x2 image
+        let src_img = create_test_rgb_image(); // 2x2 image
 
         // Test all positions with 6x6 padding
         let positions = [
@@ -501,7 +411,7 @@ mod tests {
         ];
 
         for (pos, expected) in positions {
-            let result = image.calculate_padding_position((6, 6), pos);
+            let result = src_img.calculate_padding_position((6, 6), pos);
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), expected);
         }

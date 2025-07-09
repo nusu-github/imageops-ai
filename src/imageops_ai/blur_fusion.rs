@@ -138,21 +138,27 @@ use crate::{
     utils::{array3_to_image, image_to_array3, validate_matching_dimensions},
 };
 
-/// Trait for performing Blur-Fusion foreground estimation on RGB images
-pub trait ForegroundEstimator<S>
+/// Trait for performing Blur-Fusion foreground estimation on RGB images.
+pub trait ForegroundEstimatorExt<S>
 where
     Rgb<S>: Pixel<Subpixel = S>,
     S: Clamp<f32> + Primitive,
     f32: From<S>,
 {
-    /// Performs Blur-Fusion foreground estimation on the image
+    /// Estimates the foreground color of an image using a given alpha matte.
+    ///
+    /// This method applies the Blur-Fusion algorithm with a single iteration.
+    ///
+    /// # Arguments
+    /// * `alpha` - The alpha matte (`Image<Luma<S>>`) corresponding to the image.
+    /// * `radius` - The blur radius for the estimation. A value of 90 is recommended for general use.
     fn estimate_foreground(
         self,
         alpha: &Image<Luma<S>>,
         radius: u32,
     ) -> Result<Image<Rgb<S>>, AlphaMaskError>;
 
-    /// Hidden _mut variant that is not available for this operation
+    /// Hidden _mut variant that is not available for this operation.
     #[doc(hidden)]
     fn estimate_foreground_mut(
         &mut self,
@@ -163,7 +169,7 @@ where
     }
 }
 
-impl<S> ForegroundEstimator<S> for Image<Rgb<S>>
+impl<S> ForegroundEstimatorExt<S> for Image<Rgb<S>>
 where
     Rgb<S>: Pixel<Subpixel = S>,
     S: Clamp<f32> + Primitive + Send + Sync,
@@ -174,12 +180,22 @@ where
         alpha: &Image<Luma<S>>,
         radius: u32,
     ) -> Result<Self, AlphaMaskError> {
-        estimate_foreground(&self, alpha, radius, 1)
+        // Call the core algorithm implementation with a single iteration.
+        estimate_foreground_iterative(&self, alpha, radius, 1)
     }
 }
 
-/// Estimates foreground colors using the Blur-Fusion algorithm
-pub fn estimate_foreground<S>(
+/// Estimates foreground colors using the Blur-Fusion algorithm with a configurable number of iterations.
+///
+/// This is the core implementation of the algorithm. For most use cases, it's recommended
+/// to use the `ForegroundEstimatorExt` trait method `estimate_foreground`.
+///
+/// # Arguments
+/// * `image` - The source RGB image.
+/// * `alpha` - The alpha matte.
+/// * `radius` - The initial blur radius. If `iterations` is 2, this is ignored and radii of 90 and 6 are used.
+/// * `iterations` - The number of iterations (1 or 2). 2 corresponds to "Blur-Fusion x2".
+pub fn estimate_foreground_iterative<S>(
     image: &Image<Rgb<S>>,
     alpha: &Image<Luma<S>>,
     radius: u32,
@@ -202,44 +218,40 @@ where
         }
     };
 
-    // --- Single conversion from ImageBuffer to ndarray ---
+    // --- Convert ImageBuffer to ndarray for processing ---
     let max_val = f32::from(S::DEFAULT_MAX_VALUE);
     let inv_max_val = 1.0 / max_val;
 
-    let image_arr = image_to_array3(image).mapv(f32::from);
-    let alpha_arr = image_to_array3(alpha).mapv(|x| f32::from(x) * inv_max_val);
+    let image = image_to_array3(image).mapv(f32::from);
+    let alpha = image_to_array3(alpha).mapv(|x| f32::from(x) * inv_max_val);
 
-    let mut foreground_arr = image_arr.clone();
+    // The foreground is initialized with the original image colors.
+    let mut foreground = image.clone();
 
     for r in radii {
-        apply_blur_fusion_step_ndarray(
-            &image_arr.view(),
-            &alpha_arr.view(),
-            &mut foreground_arr,
-            r,
-        )?;
+        apply_blur_fusion_pass_impl(&image.view(), &alpha.view(), &mut foreground, r)?;
     }
 
-    // --- Single conversion from ndarray to ImageBuffer ---
-    Ok(array3_to_image(&foreground_arr.mapv(S::clamp).view()))
+    // --- Convert the final ndarray back to ImageBuffer ---
+    Ok(array3_to_image(&foreground.mapv(S::clamp).view()))
 }
 
-/// Applies one step of the Blur-Fusion algorithm entirely on ndarrays.
-fn apply_blur_fusion_step_ndarray(
+/// Applies one pass of the Blur-Fusion algorithm.
+fn apply_blur_fusion_pass_impl(
     image: &ArrayView3<f32>,
     alpha: &ArrayView3<f32>,
     foreground: &mut Array3<f32>,
     radius: u32,
 ) -> Result<(), AlphaMaskError> {
-    // Phase 1: Compute blurred estimates using the ndarray-based function
-    let (f_hat, b_hat) = compute_optimized_smoothed_estimates_ndarray(
+    // Phase 1: Compute blurred estimates for foreground and background.
+    let (f_hat, b_hat) = compute_smoothed_estimates_impl(
         &foreground.view(),
-        image, // The original image is used as the initial background estimate
+        image, // The original image is used as the initial background estimate.
         alpha,
         radius,
     )?;
 
-    // Phase 2: Apply final foreground estimation using ndarray vectorized operations
+    // Phase 2: Apply the core Blur-Fusion compositing equation.
     let beta = 1.0 - alpha;
     let correction = image - (alpha * &f_hat) - (&beta * &b_hat);
     *foreground = &f_hat + alpha * &correction;
@@ -247,8 +259,8 @@ fn apply_blur_fusion_step_ndarray(
     Ok(())
 }
 
-/// Optimized computation of smoothed estimates using direct f32 box filtering on ndarrays.
-fn compute_optimized_smoothed_estimates_ndarray(
+/// Computes smoothed estimates F-hat and B-hat using box filtering.
+fn compute_smoothed_estimates_impl(
     foreground: &ArrayView3<f32>,
     background: &ArrayView3<f32>,
     alpha: &ArrayView3<f32>,
@@ -256,46 +268,26 @@ fn compute_optimized_smoothed_estimates_ndarray(
 ) -> Result<(Array3<f32>, Array3<f32>), AlphaMaskError> {
     let beta = 1.0 - alpha;
 
-    // Create weighted arrays
-    let fg_weighted = foreground * alpha;
-    let bg_weighted = background * &beta;
+    // Weight the foreground and background by their respective alpha values.
+    let foreground_weighted = foreground * alpha;
+    let background_weighted = background * &beta;
 
-    // Apply box filter to all weighted images
+    // Apply a separable box filter to the weighted images and the mattes.
     let filter = BoxFilterSeparable::new(radius)?;
-    let fg_blurred = filter.filter_array(&fg_weighted.view())?;
-    let bg_blurred = filter.filter_array(&bg_weighted.view())?;
+    let foreground_blurred = filter.filter_array(&foreground_weighted.view())?;
+    let background_blurred = filter.filter_array(&background_weighted.view())?;
     let alpha_blurred = filter.filter_array(&alpha.view())?;
     let beta_blurred = filter.filter_array(&beta.view())?;
 
-    // Reconstruct final averaged images
-    let mut f_hat = foreground.to_owned();
-    let mut b_hat = background.to_owned();
-
-    // Avoid division by zero where weights are zero
-    let alpha_weight_mask = &alpha_blurred.mapv(|x| x > 1e-6);
-    let beta_weight_mask = &beta_blurred.mapv(|x| x > 1e-6);
-
-    f_hat.zip_mut_with(alpha_weight_mask, |f, &mask| {
-        if !mask {
-            *f = 0.0
-        }
-    });
-    b_hat.zip_mut_with(beta_weight_mask, |b, &mask| {
-        if !mask {
-            *b = 0.0
-        }
-    });
-
-    let f_hat_normalized = fg_blurred / &alpha_blurred.mapv(|x| if x > 1e-6 { x } else { 1.0 });
-    let b_hat_normalized = bg_blurred / &beta_blurred.mapv(|x| if x > 1e-6 { x } else { 1.0 });
-
-    f_hat.zip_mut_with(&f_hat_normalized, |f, &n| *f = n);
-    b_hat.zip_mut_with(&b_hat_normalized, |b, &n| *b = n);
+    // Reconstruct the final estimates by dividing the blurred, weighted colors
+    // by the blurred weights. A small epsilon is used to prevent division by zero.
+    let f_hat = &foreground_blurred / &alpha_blurred.mapv(|x| if x > 1e-6 { x } else { 1.0 });
+    let b_hat = &background_blurred / &beta_blurred.mapv(|x| if x > 1e-6 { x } else { 1.0 });
 
     Ok((f_hat, b_hat))
 }
 
-/// Validates input parameters
+/// Validates input parameters for the foreground estimation.
 fn validate_inputs<T>(
     image: &Image<Rgb<T>>,
     alpha: &Image<Luma<T>>,
@@ -346,36 +338,54 @@ mod tests {
     use image::{ImageBuffer, Luma, Rgb};
 
     #[test]
-    fn test_validate_inputs() {
+    fn validate_inputs_succeeds_on_valid_parameters() {
         let image: Image<Rgb<u8>> = Image::new(12, 12);
         let alpha: Image<Luma<u8>> = Image::new(12, 12);
-
         assert!(validate_inputs(&image, &alpha, 5, 1).is_ok());
+    }
 
+    #[test]
+    fn validate_inputs_fails_on_dimension_mismatch() {
+        let image: Image<Rgb<u8>> = Image::new(12, 12);
         let alpha_wrong_size: Image<Luma<u8>> = Image::new(5, 5);
         assert!(validate_inputs(&image, &alpha_wrong_size, 5, 1).is_err());
+    }
 
+    #[test]
+    fn validate_inputs_fails_on_zero_radius() {
+        let image: Image<Rgb<u8>> = Image::new(12, 12);
+        let alpha: Image<Luma<u8>> = Image::new(12, 12);
         assert!(validate_inputs(&image, &alpha, 0, 1).is_err());
+    }
+
+    #[test]
+    fn validate_inputs_fails_on_invalid_iterations() {
+        let image: Image<Rgb<u8>> = Image::new(12, 12);
+        let alpha: Image<Luma<u8>> = Image::new(12, 12);
         assert!(validate_inputs(&image, &alpha, 5, 0).is_err());
         assert!(validate_inputs(&image, &alpha, 5, 3).is_err());
+    }
 
+    #[test]
+    fn validate_inputs_fails_on_small_image_for_radius() {
         let small_image: Image<Rgb<u8>> = Image::new(3, 3);
         let small_alpha: Image<Luma<u8>> = Image::new(3, 3);
         assert!(validate_inputs(&small_image, &small_alpha, 5, 1).is_err());
     }
 
     #[test]
-    fn test_blur_fusion_ndarray_logic() {
+    fn blur_fusion_with_uniform_inputs_returns_original_color() {
         let image: Image<Rgb<f32>> = ImageBuffer::from_pixel(10, 10, Rgb([0.5, 0.2, 0.8]));
         let alpha: Image<Luma<f32>> = ImageBuffer::from_pixel(10, 10, Luma([0.5]));
 
-        let result_img = estimate_foreground(&image, &alpha, 1, 1).unwrap();
+        let result_img = estimate_foreground_iterative(&image, &alpha, 1, 1).unwrap();
         let result_arr = image_to_array3(&result_img);
 
         // In a uniform area, the foreground should be close to the original image color.
         let pixel = result_arr.slice(s![5usize, 5usize, ..]);
-        assert!((pixel[0] - 0.5).abs() < 1e-5);
-        assert!((pixel[1] - 0.2).abs() < 1e-5);
-        assert!((pixel[2] - 0.8).abs() < 1e-5);
+        let expected = [0.5, 0.2, 0.8];
+        assert!((pixel[0] - expected[0]).abs() < 1e-5);
+        assert!((pixel[1] - expected[1]).abs() < 1e-5);
+        assert!((pixel[2] - expected[2]).abs() < 1e-5);
     }
 }

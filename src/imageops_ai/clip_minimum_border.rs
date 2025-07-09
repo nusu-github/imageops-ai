@@ -61,7 +61,8 @@ pub trait ClipMinimumBorder<S> {
 impl<P, S> ClipMinimumBorder<S> for Image<P>
 where
     P: Pixel<Subpixel = S>,
-    S: Into<f32> + Clamp<f32> + Primitive,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
     fn clip_minimum_border(self, iterations: usize, threshold: S) -> Result<Self, ClipBorderError> {
         let mut image = self;
@@ -92,7 +93,8 @@ trait ImageProcessing<P: Pixel> {
 impl<P> ImageProcessing<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Into<f32> + Clamp<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn extract_corners(&self) -> [Luma<P::Subpixel>; 4] {
         let (width, height) = self.dimensions();
@@ -112,9 +114,9 @@ where
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4] {
-        let background_value: f32 = background[0].into();
-        let max_value: f32 = P::Subpixel::DEFAULT_MAX_VALUE.into();
-        let threshold_value: f32 = threshold.into();
+        let background_value = f32::from(background[0]);
+        let max_value = f32::from(P::Subpixel::DEFAULT_MAX_VALUE);
+        let threshold_value = f32::from(threshold);
 
         let (width, height) = self.dimensions();
         let mut bounds = [width, height, 0, 0]; // [x1, y1, x2, y2]
@@ -122,7 +124,7 @@ where
         // Directly iterate over pixels without creating intermediate difference image
         for (x, y, pixel) in self.enumerate_pixels() {
             let pixel_luma = pixel.to_luma_alpha().to_luma();
-            let pixel_value: f32 = pixel_luma[0].into();
+            let pixel_value = f32::from(pixel_luma[0]);
 
             // Calculate difference and check against threshold
             let normalized_pixel = pixel_value / max_value;
@@ -146,12 +148,13 @@ where
 /// Generic merge_alpha function
 fn merge_alpha<S>(pixel: LumaA<S>) -> Luma<S>
 where
-    S: Primitive + Into<f32> + Clamp<f32>,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
-    let max = S::DEFAULT_MAX_VALUE.into();
+    let max = f32::from(S::DEFAULT_MAX_VALUE);
     let LumaA([l, a]) = pixel;
-    let l_f32 = l.into();
-    let a_f32 = a.into() / max;
+    let l_f32 = f32::from(l);
+    let a_f32 = f32::from(a) / max;
     let result = S::clamp(l_f32 * a_f32);
     Luma([result])
 }

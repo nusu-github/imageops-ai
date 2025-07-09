@@ -5,7 +5,8 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
+    ApplyAlphaMask, ForegroundEstimatorExt, Image, PadExt, Position, PremultiplyAlpha,
+    PremultiplyAlphaAndDrop,
 };
 
 /// Test helper to create a test RGB image with known pattern
@@ -102,7 +103,7 @@ fn test_alpha_premultiply_workflow() {
 
     // Apply alpha premultiplication
     let rgb_result = rgba_image
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(rgb_result.dimensions(), (5, 5));
@@ -202,7 +203,7 @@ fn test_complex_workflow_all_operations() {
 
     // Step 5: Convert back to RGB with premultiplication
     let final_result = rgba_result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(final_result.dimensions(), (15, 15));

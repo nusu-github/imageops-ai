@@ -4,6 +4,10 @@
 //! works correctly with real-world image data, including file I/O operations.
 
 use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage, Rgba, RgbaImage};
+use imageops_ai::{
+    ApplyAlphaMask, ForegroundEstimatorExt, Image, PadExt, Position, PremultiplyAlpha,
+    PremultiplyAlphaAndDrop,
+};
 use std::path::{Path, PathBuf};
 
 /// Get the path to test resources directory
@@ -173,7 +177,7 @@ fn test_load_and_process_rgba_image() {
 
     // Test alpha premultiplication
     let rgb_result = image
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(rgb_result.dimensions(), (80, 80));
@@ -267,7 +271,7 @@ fn test_complete_workflow_with_real_images() {
         .expect("Alpha mask application should succeed");
 
     let premultiplied = with_alpha
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     let (final_result, position) = premultiplied
@@ -310,7 +314,7 @@ fn test_large_real_image_processing() {
 
     // Test padding to even larger size
     let (padded, _) = result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Large image premultiplication should succeed")
         .add_padding((250, 200), Position::Center, Rgb([64, 64, 64]))
         .expect("Large image padding should succeed");
@@ -341,7 +345,7 @@ fn test_edge_case_real_images() {
 
     // Test padding tiny image
     let (padded, position) = result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Tiny image premultiplication should succeed")
         .add_padding((10, 10), Position::Center, Rgb([255, 0, 0]))
         .expect("Tiny image padding should succeed");

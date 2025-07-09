@@ -297,18 +297,22 @@ where
 
 pub fn to_f32_luma<T>(image: &Image<Luma<T>>) -> Image<Luma<f32>>
 where
-    T: Primitive + Into<f32>,
+    T: Primitive,
     Luma<T>: Pixel<Subpixel = T>,
+    f32: From<T>,
 {
-    map_colors(image, |p| Luma([p[0].into()]))
+    map_colors(image, |p| Luma([f32::from(p[0])]))
 }
 
 pub fn to_f32_rgb<T>(image: &Image<Rgb<T>>) -> Image<Rgb<f32>>
 where
-    T: Primitive + Into<f32>,
+    T: Primitive,
     Rgb<T>: Pixel<Subpixel = T>,
+    f32: From<T>,
 {
-    map_colors(image, |p| Rgb([p[0].into(), p[1].into(), p[2].into()]))
+    map_colors(image, |p| {
+        Rgb([f32::from(p[0]), f32::from(p[1]), f32::from(p[2])])
+    })
 }
 
 pub struct GuidedFilterGray {
@@ -322,8 +326,9 @@ pub struct GuidedFilterGray {
 impl GuidedFilterGray {
     pub fn new<T>(guidance: &Image<Luma<T>>, radius: u32, epsilon: f32) -> Self
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Luma<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let guidance_f32 = to_f32_luma(guidance);
         let guidance_mean = box_filter(&guidance_f32, radius);
@@ -351,8 +356,9 @@ impl GuidedFilterGray {
 
     pub fn filter<T>(&self, input: &Image<Luma<T>>) -> Image<Luma<f32>>
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Luma<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let input_f32 = to_f32_luma(input);
         let input_mean = box_filter(&input_f32, self.radius);
@@ -429,8 +435,9 @@ impl FastGuidedFilterImpl {
     }
     pub fn new_gray<T>(guidance: &Image<Luma<T>>, radius: u32, epsilon: f32, scale: u32) -> Self
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Luma<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let guidance_f32 = to_f32_luma(guidance);
         let (width, height) = guidance_f32.dimensions();
@@ -488,8 +495,9 @@ impl FastGuidedFilterImpl {
 
     pub fn new_color<T>(guidance: &Image<Rgb<T>>, radius: u32, epsilon: f32, scale: u32) -> Self
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Rgb<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let guidance_f32_full = to_f32_rgb(guidance);
         let (width, height) = guidance_f32_full.dimensions();
@@ -847,8 +855,9 @@ impl FastGuidedFilterImpl {
 
     pub fn filter<T>(&self, input: &Image<Luma<T>>) -> Image<Luma<f32>>
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Luma<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let input_f32 = to_f32_luma(input);
         let (width, height) = input_f32.dimensions();
@@ -936,8 +945,9 @@ impl FastGuidedFilterImpl {
 impl GuidedFilterColor {
     pub fn new<T>(guidance: &Image<Rgb<T>>, radius: u32, epsilon: f32) -> Self
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Rgb<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let guidance_f32 = to_f32_rgb(guidance);
         let guidance_mean = box_filter_rgb(&guidance_f32, radius);
@@ -1072,8 +1082,9 @@ impl GuidedFilterColor {
 
     pub fn filter<T>(&self, input: &Image<Luma<T>>) -> Image<Luma<f32>>
     where
-        T: Primitive + Into<f32>,
+        T: Primitive,
         Luma<T>: Pixel<Subpixel = T>,
+        f32: From<T>,
     {
         let input_f32 = to_f32_luma(input);
         let input_mean = box_filter(&input_f32, self.radius);

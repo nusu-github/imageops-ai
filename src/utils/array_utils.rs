@@ -31,7 +31,7 @@ where
     P: Pixel<Subpixel = S>,
     S: Primitive,
 {
-    let (height, width, channels) = arr.dim();
+    let (height, width, _channels) = arr.dim();
     let (raw_vec, _offset) = arr.into_owned().into_raw_vec_and_offset();
     ImageBuffer::from_raw(width as u32, height as u32, raw_vec)
         .expect("Failed to create ImageBuffer from raw data")

@@ -9,28 +9,6 @@ pub use array_utils::{array3_to_image, image_to_array3};
 
 pub use unify::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
-use image::Primitive;
-
-/// Normalizes an alpha value using a pre-computed max value.
-///
-/// This is more efficient when processing multiple pixels with the same type.
-///
-/// # Arguments
-///
-/// * `alpha` - The alpha value to normalize
-/// * `max_value` - The pre-computed maximum value for the type
-///
-/// # Returns
-///
-/// The normalized alpha value as a floating-point number between 0 and 1
-#[inline]
-pub fn normalize_alpha_with_max<S>(alpha: S, max_value: f32) -> f32
-where
-    S: Into<f32> + Primitive,
-{
-    alpha.into() / max_value
-}
-
 /// Validates that an image has non-zero dimensions.
 ///
 /// # Arguments
@@ -83,13 +61,6 @@ pub fn validate_matching_dimensions(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_normalize_alpha_with_max() {
-        assert_eq!(normalize_alpha_with_max(0u8, 255.0), 0.0);
-        assert_eq!(normalize_alpha_with_max(127u8, 255.0), 127.0 / 255.0);
-        assert_eq!(normalize_alpha_with_max(255u8, 255.0), 1.0);
-    }
 
     #[test]
     fn test_validate_non_empty_image() {

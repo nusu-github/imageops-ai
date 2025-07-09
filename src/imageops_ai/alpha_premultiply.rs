@@ -4,58 +4,107 @@ use ndarray::prelude::*;
 
 use crate::error::ConvertColorError;
 
-/// Trait for merging (premultiplying) alpha channel into color channels.
-///
-/// This operation multiplies each color channel by the alpha value,
-/// effectively creating a premultiplied alpha image. The alpha channel
+// --- Public Traits ---
 
-/// is discarded in the output.
+/// A trait for premultiplying the alpha channel into color channels.
 ///
-/// # Alpha Premultiplication
+/// This trait provides methods for standard alpha premultiplication, where the
+/// color channels are multiplied by the alpha value, and the alpha channel is preserved.
+/// It offers both an owning (`premultiply_alpha`) and a mutable (`premultiply_alpha_mut`) version.
+pub trait PremultiplyAlpha {
+    /// Consumes the image and returns a new image with premultiplied alpha.
+    ///
+    /// The alpha channel is preserved.
+    fn premultiply_alpha(self) -> Result<Self, ConvertColorError>
+    where
+        Self: Sized;
+
+    /// Premultiplies the alpha of the image in-place.
+    ///
+    /// This method operates on a mutable reference and avoids extra allocations.
+    /// The alpha channel is preserved.
+    fn premultiply_alpha_mut(&mut self) -> Result<&mut Self, ConvertColorError>
+    where
+        Self: Sized;
+}
+
+/// A trait for premultiplying the alpha channel and dropping it from the final image.
 ///
-/// Alpha premultiplication is the process of multiplying the color channels
-/// by the alpha value, resulting in:
-/// - Red' = Red × Alpha
-/// - Green' = Green × Alpha
-/// - Blue' = Blue × Alpha
-/// - Luminance' = Luminance × Alpha
-///
-/// This is commonly used in compositing operations and can help reduce
-/// artifacts in image processing pipelines.
-///
-/// Note: This trait performs type conversion (e.g., Rgba -> Rgb). For in-place
-/// premultiplication while keeping the alpha channel, use the `PremultiplyAlphaInPlace` trait.
-pub trait AlphaPremultiply {
+/// This operation is useful when converting an image with an alpha channel (e.g., `Rgba`)
+/// to one without (e.g., `Rgb`), such as for displaying on a solid background.
+pub trait PremultiplyAlphaAndDrop {
+    /// The output image type, which does not have an alpha channel.
     type Output;
 
-    /// Premultiplies color channels by alpha and returns an image without alpha channel.
-    ///
-    /// This consumes the original image.
-    ///
-    /// # Returns
-    /// * `Ok(Self::Output)` - Successfully premultiplied image
-    /// * `Err(ConvertColorError)` - If conversion fails
-    fn premultiply_alpha(self) -> Result<Self::Output, ConvertColorError>;
+    /// Consumes the image, premultiplies the alpha, and returns a new image
+    /// without an alpha channel.
+    fn premultiply_alpha_and_drop(self) -> Result<Self::Output, ConvertColorError>;
 }
 
-/// Trait for in-place alpha premultiplication (keeps alpha channel).
-///
-/// This trait provides functionality to premultiply color channels with alpha
-/// while preserving the alpha channel in the output.
-pub trait PremultiplyAlphaInPlace {
-    /// Premultiplies color channels by alpha, keeping the alpha channel.
-    ///
-    /// This consumes the original image and returns a premultiplied version
-    /// with the same pixel type.
-    fn premultiply_alpha_keep(self) -> Result<Self, ConvertColorError>
-    where
-        Self: Sized;
+// --- Trait Implementations ---
 
-    /// Premultiplies color channels by alpha in-place, modifying the image.
-    fn premultiply_alpha_keep_mut(&mut self) -> Result<&mut Self, ConvertColorError>
-    where
-        Self: Sized;
+impl<S> PremultiplyAlpha for Image<LumaA<S>>
+where
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
+{
+    fn premultiply_alpha(self) -> Result<Self, ConvertColorError> {
+        let mut image = self;
+        premultiply_alpha_in_place_impl(&mut image)?;
+        Ok(image)
+    }
+
+    fn premultiply_alpha_mut(&mut self) -> Result<&mut Self, ConvertColorError> {
+        premultiply_alpha_in_place_impl(self)?;
+        Ok(self)
+    }
 }
+
+impl<S> PremultiplyAlpha for Image<Rgba<S>>
+where
+    Rgba<S>: Pixel<Subpixel = S>,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
+{
+    fn premultiply_alpha(self) -> Result<Self, ConvertColorError> {
+        let mut image = self;
+        premultiply_alpha_in_place_impl(&mut image)?;
+        Ok(image)
+    }
+
+    fn premultiply_alpha_mut(&mut self) -> Result<&mut Self, ConvertColorError> {
+        premultiply_alpha_in_place_impl(self)?;
+        Ok(self)
+    }
+}
+
+impl<S> PremultiplyAlphaAndDrop for Image<LumaA<S>>
+where
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
+{
+    type Output = Image<Luma<S>>;
+
+    fn premultiply_alpha_and_drop(self) -> Result<Self::Output, ConvertColorError> {
+        premultiply_and_drop_alpha_impl(&self)
+    }
+}
+
+impl<S> PremultiplyAlphaAndDrop for Image<Rgba<S>>
+where
+    Rgba<S>: Pixel<Subpixel = S>,
+    Rgb<S>: Pixel<Subpixel = S>,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
+{
+    type Output = Image<Rgb<S>>;
+
+    fn premultiply_alpha_and_drop(self) -> Result<Self::Output, ConvertColorError> {
+        premultiply_and_drop_alpha_impl(&self)
+    }
+}
+
+// --- Core Implementations ---
 
 /// Core implementation for alpha premultiplication that drops the alpha channel.
 fn premultiply_and_drop_alpha_impl<P, S, O>(image: &Image<P>) -> Result<Image<O>, ConvertColorError>
@@ -69,15 +118,15 @@ where
     let (width, height) = image.dimensions();
     let max_value = f32::from(S::DEFAULT_MAX_VALUE);
     let num_pixels = (width * height) as usize;
-    let in_channels = P::CHANNEL_COUNT as usize;
-    let alpha_index = in_channels - 1;
+    let num_channels = P::CHANNEL_COUNT as usize;
+    let alpha_index = num_channels - 1;
 
     let array = if max_value == 1.0 {
         ArrayView1::from(image.as_raw()).mapv(f32::from)
     } else {
         ArrayView1::from(image.as_raw()).mapv(|x| f32::from(x) / max_value)
     }
-    .into_shape_with_order((num_pixels, in_channels))
+    .into_shape_with_order((num_pixels, num_channels))
     .map_err(|_| ConvertColorError::BufferCreationFailed)?;
 
     let alphas = array.column(alpha_index);
@@ -96,107 +145,41 @@ where
     ImageBuffer::from_raw(width, height, result_vec).ok_or(ConvertColorError::EmptyImage)
 }
 
-/// Core implementation for in-place alpha premultiplication that keeps the alpha channel.
-/// This function reallocates the buffer.
-fn premultiply_and_keep_alpha_impl<P, S>(image: &mut Image<P>) -> Result<(), ConvertColorError>
+/// Core implementation for in-place alpha premultiplication (preserves alpha channel).
+/// This function modifies the image buffer directly without reallocation.
+fn premultiply_alpha_in_place_impl<P, S>(image: &mut Image<P>) -> Result<(), ConvertColorError>
 where
     P: Pixel<Subpixel = S>,
     S: Clamp<f32> + Primitive,
     f32: From<S>,
 {
     validate_image_dimensions(image)?;
-    let (width, height) = image.dimensions();
     let max_value = f32::from(S::DEFAULT_MAX_VALUE);
-    let num_pixels = (width * height) as usize;
-    let channels = P::CHANNEL_COUNT as usize;
-    let alpha_index = channels - 1;
+    let num_channels = P::CHANNEL_COUNT as usize;
+    let alpha_index = num_channels - 1;
 
-    let mut array = if max_value == 1.0 {
-        ArrayView1::from(image.as_raw()).mapv(f32::from)
-    } else {
-        ArrayView1::from(image.as_raw()).mapv(|x| f32::from(x) / max_value)
-    }
-    .into_shape_with_order((num_pixels, channels))
-    .map_err(|_| ConvertColorError::BufferCreationFailed)?;
+    let buffer = image.as_mut();
+    let array: ArrayBase<ndarray::ViewRepr<&mut S>, Dim<[usize; 2]>> =
+        ArrayViewMut2::from_shape((buffer.len() / num_channels, num_channels), buffer)
+            .map_err(|_| ConvertColorError::BufferCreationFailed)?;
 
-    for mut pixel in array.axis_iter_mut(Axis(0)) {
-        let alpha = pixel[alpha_index];
-        let mut colors = pixel.slice_mut(s![0..alpha_index]);
-        colors *= alpha;
-    }
+    // `split_at_mut` splits the array into two mutable views.
+    let (mut colors, alphas) = array.split_at(Axis(1), alpha_index);
 
-    let result_vec = if max_value == 1.0 {
-        array.mapv(|x| S::clamp(x))
-    } else {
-        array.mapv(|x| S::clamp(x * max_value))
-    }
-    .into_raw_vec_and_offset()
-    .0;
+    // `alphas` is a column view (shape [n, 1]). Convert it to a 1D array of f32 values
+    // for use in `azip!`.
+    let alpha_values = alphas.column(0).mapv(|a| f32::from(a) / max_value);
 
-    *image =
-        ImageBuffer::from_raw(width, height, result_vec).ok_or(ConvertColorError::EmptyImage)?;
+    // Zip the rows of the color channels with the 1D array of alpha values.
+    azip!((mut color_row in colors.rows_mut(), &alpha in &alpha_values) {
+        // Each `color_row` is an `ArrayViewMut1`, which can be modified in place.
+        color_row.mapv_inplace(|c| {
+            let c_f32 = f32::from(c) / max_value;
+            S::clamp(c_f32 * alpha * max_value)
+        });
+    });
+
     Ok(())
-}
-
-impl<S> AlphaPremultiply for Image<LumaA<S>>
-where
-    S: Clamp<f32> + Primitive,
-    f32: From<S>,
-{
-    type Output = Image<Luma<S>>;
-
-    fn premultiply_alpha(self) -> Result<Self::Output, ConvertColorError> {
-        premultiply_and_drop_alpha_impl(&self)
-    }
-}
-
-impl<S> AlphaPremultiply for Image<Rgba<S>>
-where
-    Rgba<S>: Pixel<Subpixel = S>,
-    Rgb<S>: Pixel<Subpixel = S>,
-    S: Clamp<f32> + Primitive,
-    f32: From<S>,
-{
-    type Output = Image<Rgb<S>>;
-
-    fn premultiply_alpha(self) -> Result<Self::Output, ConvertColorError> {
-        premultiply_and_drop_alpha_impl(&self)
-    }
-}
-
-impl<S> PremultiplyAlphaInPlace for Image<LumaA<S>>
-where
-    S: Clamp<f32> + Primitive,
-    f32: From<S>,
-{
-    fn premultiply_alpha_keep(self) -> Result<Self, ConvertColorError> {
-        let mut image = self;
-        premultiply_and_keep_alpha_impl(&mut image)?;
-        Ok(image)
-    }
-
-    fn premultiply_alpha_keep_mut(&mut self) -> Result<&mut Self, ConvertColorError> {
-        premultiply_and_keep_alpha_impl(self)?;
-        Ok(self)
-    }
-}
-
-impl<S> PremultiplyAlphaInPlace for Image<Rgba<S>>
-where
-    Rgba<S>: Pixel<Subpixel = S>,
-    S: Clamp<f32> + Primitive,
-    f32: From<S>,
-{
-    fn premultiply_alpha_keep(self) -> Result<Self, ConvertColorError> {
-        let mut image = self;
-        premultiply_and_keep_alpha_impl(&mut image)?;
-        Ok(image)
-    }
-
-    fn premultiply_alpha_keep_mut(&mut self) -> Result<&mut Self, ConvertColorError> {
-        premultiply_and_keep_alpha_impl(self)?;
-        Ok(self)
-    }
 }
 
 /// Validates image dimensions for processing
@@ -219,29 +202,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_image_dimensions() {
+    fn validate_dimensions_accepts_valid_image() {
         let valid_image: Image<Rgb<u8>> = Image::new(10, 10);
         assert!(validate_image_dimensions(&valid_image).is_ok());
+    }
 
+    #[test]
+    fn validate_dimensions_rejects_empty_image() {
         let empty_image: Image<Rgb<u8>> = Image::new(0, 0);
         assert!(validate_image_dimensions(&empty_image).is_err());
+    }
 
+    #[test]
+    fn validate_dimensions_rejects_zero_width_image() {
         let invalid_width: Image<Rgb<u8>> = Image::new(0, 10);
         assert!(validate_image_dimensions(&invalid_width).is_err());
+    }
 
+    #[test]
+    fn validate_dimensions_rejects_zero_height_image() {
         let invalid_height: Image<Rgb<u8>> = Image::new(10, 0);
         assert!(validate_image_dimensions(&invalid_height).is_err());
     }
 
     #[test]
-    fn test_alpha_premultiply_luma() {
+    fn premultiply_and_drop_for_luma_a_works_correctly() {
         let mut image: Image<LumaA<u8>> = Image::new(2, 2);
         image.put_pixel(0, 0, LumaA([200, 255])); // Full opacity
         image.put_pixel(1, 0, LumaA([200, 127])); // Half opacity
         image.put_pixel(0, 1, LumaA([200, 0])); // Transparent
         image.put_pixel(1, 1, LumaA([100, 255])); // Full opacity, different value
 
-        let result = image.premultiply_alpha().unwrap();
+        let result = image.premultiply_alpha_and_drop().unwrap();
 
         assert_eq!(result.get_pixel(0, 0)[0], 200); // 200 * 1.0
         assert_eq!(result.get_pixel(1, 0)[0], 99); // 200 * 0.498
@@ -250,14 +242,14 @@ mod tests {
     }
 
     #[test]
-    fn test_alpha_premultiply_rgba() {
+    fn premultiply_and_drop_for_rgba_works_correctly() {
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         image.put_pixel(0, 0, Rgba([200, 150, 100, 255])); // Full opacity
         image.put_pixel(1, 0, Rgba([200, 150, 100, 127])); // Half opacity
         image.put_pixel(0, 1, Rgba([200, 150, 100, 0])); // Transparent
         image.put_pixel(1, 1, Rgba([100, 50, 25, 255])); // Full opacity, different values
 
-        let result = image.premultiply_alpha().unwrap();
+        let result = image.premultiply_alpha_and_drop().unwrap();
 
         // Full opacity case
         let pixel_00 = result.get_pixel(0, 0);
@@ -285,14 +277,12 @@ mod tests {
     }
 
     #[test]
-    fn test_premultiply_alpha_keep_luma() {
-        use crate::PremultiplyAlphaInPlace;
-
+    fn premultiply_alpha_owned_for_luma_a_preserves_alpha() {
         let mut image: Image<LumaA<u8>> = Image::new(2, 2);
         image.put_pixel(0, 0, LumaA([200, 255])); // Full opacity
         image.put_pixel(1, 0, LumaA([200, 127])); // Half opacity
 
-        let result = image.clone().premultiply_alpha_keep().unwrap();
+        let result = image.clone().premultiply_alpha().unwrap();
 
         // Check that luminance is premultiplied but alpha is preserved
         assert_eq!(result.get_pixel(0, 0).0, [200, 255]); // 200 * 1.0, alpha preserved
@@ -300,18 +290,15 @@ mod tests {
     }
 
     #[test]
-    fn test_premultiply_alpha_keep_mut_rgba() {
-        use crate::PremultiplyAlphaInPlace;
-
+    fn premultiply_alpha_mut_for_rgba_preserves_alpha() {
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         image.put_pixel(0, 0, Rgba([200, 150, 100, 255])); // Full opacity
         image.put_pixel(1, 0, Rgba([200, 150, 100, 127])); // Half opacity
 
-        let mut image_copy = image.clone();
-        image_copy.premultiply_alpha_keep_mut().unwrap();
+        image.premultiply_alpha_mut().unwrap();
 
         // Check that colors are premultiplied but alpha is preserved
-        assert_eq!(image_copy.get_pixel(0, 0).0, [200, 150, 100, 255]); // Full opacity unchanged
-        assert_eq!(image_copy.get_pixel(1, 0).0, [99, 74, 49, 127]); // Premultiplied, alpha preserved
+        assert_eq!(image.get_pixel(0, 0).0, [200, 150, 100, 255]); // Full opacity unchanged
+        assert_eq!(image.get_pixel(1, 0).0, [99, 74, 49, 127]); // Premultiplied, alpha preserved
     }
 }
