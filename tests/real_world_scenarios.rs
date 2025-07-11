@@ -9,7 +9,7 @@ use imageops_ai::*;
 /// Profile photo processing scenario
 /// Typical workflow: foreground estimation → background removal → padding for profile picture
 #[test]
-fn test_profile_photo_processing_workflow() {
+fn profile_photo_processing_workflow_works() {
     // Simulate a portrait photo with subject in center
     let mut portrait: Image<Rgb<u8>> = Image::new(200, 300); // Portrait orientation
 
@@ -99,7 +99,7 @@ fn test_profile_photo_processing_workflow() {
 /// Banner creation scenario
 /// Workflow: multiple images → composition → padding to banner dimensions
 #[test]
-fn test_banner_creation_workflow() {
+fn banner_creation_workflow_works() {
     // Create logo-like image
     let mut logo: Image<Rgb<u8>> = Image::new(60, 40);
     for y in 0..40 {
@@ -160,7 +160,7 @@ fn test_banner_creation_workflow() {
 /// Product photo background removal scenario
 /// Workflow: background detection → foreground estimation → clean background
 #[test]
-fn test_product_photo_background_removal() {
+fn product_photo_background_removal_works() {
     // Create product photo simulation (watch, jewelry, etc.)
     let mut product_photo: Image<Rgb<u8>> = Image::new(400, 400);
 
@@ -244,7 +244,7 @@ fn test_product_photo_background_removal() {
 /// Social media content creation scenario
 /// Workflow: multiple images → composition → optimized dimensions
 #[test]
-fn test_social_media_content_creation() {
+fn social_media_content_creation_works() {
     // Create main content image
     let mut main_image: Image<Rgb<u8>> = Image::new(300, 200);
     for y in 0..200 {
@@ -319,7 +319,7 @@ fn test_social_media_content_creation() {
 /// E-commerce thumbnail generation scenario
 /// Workflow: product image → standardized sizing → background consistency
 #[test]
-fn test_ecommerce_thumbnail_generation() {
+fn ecommerce_thumbnail_generation_works() {
     // Simulate various product images with different aspect ratios
     let products = vec![
         (100, 150), // Tall product (bottle, etc.)
@@ -383,7 +383,7 @@ fn test_ecommerce_thumbnail_generation() {
 /// Batch processing consistency test
 /// Verify that processing multiple images produces consistent results
 #[test]
-fn test_batch_processing_consistency() {
+fn batch_processing_consistency_works() {
     // Create multiple similar images
     let image_count = 5;
     let mut test_images = Vec::new();

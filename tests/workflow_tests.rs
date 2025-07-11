@@ -5,7 +5,7 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
+    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
 };
 
 /// Test helper to create a test RGB image with known pattern
@@ -45,7 +45,7 @@ fn create_test_alpha_mask() -> Image<Luma<u8>> {
 }
 
 #[test]
-fn test_basic_workflow_padding_then_alpha_mask() {
+fn rgb_padding_then_alpha_mask_workflow_works() {
     // Workflow: RGB image → Padding → Alpha mask application
     let image = create_test_image();
     let mask_small = create_test_alpha_mask();
@@ -59,23 +59,23 @@ fn test_basic_workflow_padding_then_alpha_mask() {
     assert_eq!(position, (5, 5)); // Centered position
 
     // Step 2: Create larger alpha mask for padded image
-    let mut large_mask: Image<Luma<u8>> = Image::new(20, 20);
+    let mut enlarged_mask: Image<Luma<u8>> = Image::new(20, 20);
     for y in 0..20 {
         for x in 0..20 {
             if (5..15).contains(&x) && (5..15).contains(&y) {
                 // Copy from original mask
                 let mask_pixel = mask_small.get_pixel(x - 5, y - 5);
-                large_mask.put_pixel(x, y, *mask_pixel);
+                enlarged_mask.put_pixel(x, y, *mask_pixel);
             } else {
                 // Transparent outside
-                large_mask.put_pixel(x, y, Luma([0]));
+                enlarged_mask.put_pixel(x, y, Luma([0]));
             }
         }
     }
 
     // Step 3: Apply alpha mask
     let result = padded_image
-        .apply_alpha_mask(&large_mask)
+        .apply_alpha_mask(&enlarged_mask)
         .expect("Alpha mask application should succeed");
 
     assert_eq!(result.dimensions(), (20, 20));
@@ -89,7 +89,7 @@ fn test_basic_workflow_padding_then_alpha_mask() {
 }
 
 #[test]
-fn test_alpha_premultiply_workflow() {
+fn rgba_premultiply_workflow_works() {
     // Workflow: Create RGBA → Alpha premultiplication
     let mut rgba_image: Image<Rgba<u8>> = Image::new(5, 5);
 
@@ -115,7 +115,7 @@ fn test_alpha_premultiply_workflow() {
 }
 
 #[test]
-fn test_foreground_estimation_with_padding() {
+fn rgb_foreground_estimation_with_padding_works() {
     // Workflow: Foreground estimation → Square padding
     let image = create_test_image();
     let alpha_mask = create_test_alpha_mask();
@@ -153,15 +153,15 @@ fn test_foreground_estimation_with_padding() {
 }
 
 #[test]
-fn test_error_propagation_in_workflow() {
+fn workflow_error_propagation_works_correctly() {
     // Test that errors propagate correctly through workflow chains
     let image = create_test_image();
 
     // Create mismatched mask (wrong dimensions)
-    let wrong_mask: Image<Luma<u8>> = Image::new(5, 5); // Different size
+    let mismatched_mask: Image<Luma<u8>> = Image::new(5, 5); // Different size
 
     // This should fail due to dimension mismatch
-    let result = image.clone().apply_alpha_mask(&wrong_mask);
+    let result = image.clone().apply_alpha_mask(&mismatched_mask);
     assert!(result.is_err());
 
     // Test with zero-sized padding (should fail)
@@ -170,7 +170,7 @@ fn test_error_propagation_in_workflow() {
 }
 
 #[test]
-fn test_complex_workflow_all_operations() {
+fn complex_workflow_all_operations_work() {
     // Complex workflow combining multiple operations
     let original_image = create_test_image();
     let alpha_mask = create_test_alpha_mask();
@@ -186,18 +186,18 @@ fn test_complex_workflow_all_operations() {
         .expect("Padding should succeed");
 
     // Step 3: Create larger alpha mask for padded image
-    let mut large_alpha: Image<Luma<u8>> = Image::new(15, 15);
+    let mut enlarged_alpha: Image<Luma<u8>> = Image::new(15, 15);
     for y in 0..15 {
         for x in 0..15 {
             let distance_from_center = (x as f32 - 7.0).hypot(y as f32 - 7.0);
             let alpha = (255.0 * (1.0 - (distance_from_center / 7.0).min(1.0))) as u8;
-            large_alpha.put_pixel(x, y, Luma([alpha]));
+            enlarged_alpha.put_pixel(x, y, Luma([alpha]));
         }
     }
 
     // Step 4: Apply alpha mask to get RGBA
     let rgba_result = padded_foreground
-        .apply_alpha_mask(&large_alpha)
+        .apply_alpha_mask(&enlarged_alpha)
         .expect("Alpha mask application should succeed");
 
     // Step 5: Convert back to RGB with premultiplication
@@ -213,7 +213,7 @@ fn test_complex_workflow_all_operations() {
 }
 
 #[test]
-fn test_workflow_consistency() {
+fn workflow_consistency_produces_identical_results() {
     // Test that applying operations in different orders produces consistent results
     let image = create_test_image();
 
@@ -240,7 +240,7 @@ fn test_workflow_consistency() {
 }
 
 #[test]
-fn test_memory_efficiency_large_workflow() {
+fn large_workflow_memory_efficiency_works() {
     // Test workflow with moderately large image to check memory efficiency
     let mut large_image: Image<Rgb<u8>> = Image::new(100, 100);
 
@@ -255,18 +255,18 @@ fn test_memory_efficiency_large_workflow() {
     }
 
     // Create alpha mask
-    let mut large_mask: Image<Luma<u8>> = Image::new(100, 100);
+    let mut gradient_mask: Image<Luma<u8>> = Image::new(100, 100);
     for y in 0..100 {
         for x in 0..100 {
             let distance = (x as f32 - 50.0).hypot(y as f32 - 50.0);
             let alpha = (255.0 * (1.0 - (distance / 50.0).min(1.0))) as u8;
-            large_mask.put_pixel(x, y, Luma([alpha]));
+            gradient_mask.put_pixel(x, y, Luma([alpha]));
         }
     }
 
     // Perform workflow
     let result = large_image
-        .apply_alpha_mask(&large_mask)
+        .apply_alpha_mask(&gradient_mask)
         .expect("Large image workflow should succeed");
 
     assert_eq!(result.dimensions(), (100, 100));

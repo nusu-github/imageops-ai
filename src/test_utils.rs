@@ -8,7 +8,7 @@ use image::{Luma, Pixel, Primitive, Rgb, Rgba};
 #[cfg(test)]
 use imageproc::definitions::Image;
 
-/// Creates a test RGB image with predefined pixel values for testing
+/// Creates a test RGB image with predefined pixel values for testing.
 ///
 /// This function creates a 2x2 test image with known pixel values:
 /// - (0,0): [200, 150, 100]
@@ -28,7 +28,7 @@ pub fn create_test_rgb_image() -> Image<Rgb<u8>> {
     image
 }
 
-/// Creates a test RGBA image with predefined pixel values for testing
+/// Creates a test RGBA image with predefined pixel values for testing.
 ///
 /// This function creates a 2x2 test image with known pixel values including alpha:
 /// - (0,0): [200, 150, 100, 255] (opaque)
@@ -48,7 +48,7 @@ pub fn create_test_rgba_image() -> Image<Rgba<u8>> {
     image
 }
 
-/// Creates a test grayscale (Luma) image with predefined pixel values for testing
+/// Creates a test grayscale (Luma) image with predefined pixel values for testing.
 ///
 /// This function creates a 2x2 test image with known grayscale values:
 /// - (0,0): [200]
@@ -69,7 +69,7 @@ pub fn create_test_luma_image() -> Image<Luma<u8>> {
     image
 }
 
-/// Creates a test alpha mask image with predefined alpha values for testing
+/// Creates a test alpha mask image with predefined alpha values for testing.
 ///
 /// This function creates a 2x2 test mask with varying transparency levels:
 /// - (0,0): [255] (fully opaque)
@@ -90,7 +90,7 @@ pub fn create_test_alpha_mask() -> Image<Luma<u8>> {
     mask
 }
 
-/// Compares two pixel values with a tolerance for floating-point precision errors
+/// Compares two pixel values with a tolerance for floating-point precision errors.
 ///
 /// This function is useful when comparing the results of operations that involve
 /// floating-point calculations, where exact equality may not be achievable due
@@ -123,7 +123,7 @@ where
     true
 }
 
-/// Compares two images pixel by pixel with a tolerance for floating-point errors
+/// Compares two images pixel by pixel with a tolerance for floating-point errors.
 ///
 /// This function compares entire images, useful for verifying the results of
 /// image processing operations that may introduce small numerical errors.
@@ -154,7 +154,7 @@ where
     true
 }
 
-/// Creates a large test image for performance testing
+/// Creates a large test image for performance testing.
 ///
 /// This function creates a larger image (e.g., 100x100) filled with a pattern
 /// that can be used for performance testing or testing with realistic image sizes.
@@ -189,7 +189,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_test_rgb_image() {
+    fn create_test_rgb_image_with_valid_input_creates_image() {
         let image = create_test_rgb_image();
         assert_eq!(image.dimensions(), (2, 2));
         assert_eq!(image.get_pixel(0, 0), &Rgb([200, 150, 100]));
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_test_rgba_image() {
+    fn create_test_rgba_image_with_valid_input_creates_image() {
         let image = create_test_rgba_image();
         assert_eq!(image.dimensions(), (2, 2));
         assert_eq!(image.get_pixel(0, 0), &Rgba([200, 150, 100, 255]));
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pixels_approx_equal() {
+    fn pixels_approx_equal_with_tolerant_comparison_returns_true() {
         let pixel1 = Rgb([100u8, 150u8, 200u8]);
         let pixel2 = Rgb([101u8, 149u8, 201u8]);
         let pixel3 = Rgb([105u8, 145u8, 205u8]);
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn test_images_approx_equal() {
+    fn images_approx_equal_with_tolerant_comparison_returns_true() {
         let image1 = create_test_rgb_image();
         let mut image2 = create_test_rgb_image();
 
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_large_test_image() {
+    fn create_large_test_image_with_valid_input_creates_image() {
         let image = create_large_test_image(10, 10);
         assert_eq!(image.dimensions(), (10, 10));
 

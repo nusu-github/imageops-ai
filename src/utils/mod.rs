@@ -68,7 +68,7 @@ pub fn validate_matching_dimensions(
 ) -> Result<(), String> {
     if width1 != width2 || height1 != height2 {
         Err(format!(
-            "{}: Image dimensions must match. Got {}x{} and {}x{}",
+            "_action_expected{}: Image dimensions must match. Got {}x{} and {}x{}",
             context, width1, height1, width2, height2
         ))
     } else {
@@ -81,14 +81,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_normalize_alpha_with_max() {
+    fn normalize_alpha_with_max_with_valid_input_returns_correct_ratios() {
         assert_eq!(normalize_alpha_with_max(0u8, 255.0), 0.0);
         assert_eq!(normalize_alpha_with_max(127u8, 255.0), 127.0 / 255.0);
         assert_eq!(normalize_alpha_with_max(255u8, 255.0), 1.0);
     }
 
     #[test]
-    fn test_validate_non_empty_image() {
+    fn validate_non_empty_image_with_valid_dimensions_accepts() {
         assert!(validate_non_empty_image(100, 100, "test").is_ok());
         assert!(validate_non_empty_image(1, 1, "test").is_ok());
         assert!(validate_non_empty_image(0, 100, "test").is_err());
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_matching_dimensions() {
+    fn validate_matching_dimensions_with_matching_sizes_accepts() {
         assert!(validate_matching_dimensions(100, 100, 100, 100, "test").is_ok());
         assert!(validate_matching_dimensions(50, 75, 50, 75, "test").is_ok());
         assert!(validate_matching_dimensions(100, 100, 100, 50, "test").is_err());

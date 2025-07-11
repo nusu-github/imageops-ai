@@ -1,20 +1,20 @@
 use image::{GenericImageView, ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
 
-use crate::error::ResizeAreaError;
+use crate::error::InterAreaError;
 
-/// Element of the weight table for area interpolation
+/// Element of the weight table for area interpolation.
 #[derive(Debug, Clone, Copy)]
-pub struct DecimateAlpha {
+pub struct InterpolationWeight {
     /// Destination index
-    pub di: u32,
+    pub destination_index: u32,
     /// Source index
-    pub si: u32,
-    /// Alpha value (weight)
-    pub alpha: f32,
+    pub source_index: u32,
+    /// Weight value
+    pub weight: f32,
 }
 
-/// OpenCV INTER_AREA interpolation implementation
+/// OpenCV INTER_AREA interpolation implementation.
 pub struct InterAreaResize {
     /// New width
     pub new_width: u32,
@@ -23,10 +23,10 @@ pub struct InterAreaResize {
 }
 
 impl InterAreaResize {
-    /// Create a new INTER_AREA resizer
-    pub const fn new(new_width: u32, new_height: u32) -> Result<Self, ResizeAreaError> {
+    /// Create a new INTER_AREA resizer.
+    pub const fn new(new_width: u32, new_height: u32) -> Result<Self, InterAreaError> {
         if new_width == 0 || new_height == 0 {
-            return Err(ResizeAreaError::InvalidTargetDimensions {
+            return Err(InterAreaError::InvalidTargetDimensions {
                 width: new_width,
                 height: new_height,
             });
@@ -38,26 +38,30 @@ impl InterAreaResize {
     }
 }
 
-/// Compute resize area decimation table
+/// Compute resize area decimation table.
 ///
 /// This function computes the weight table for area interpolation based on the
 /// source size, destination size, and scale factor.
-fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f32) -> Vec<DecimateAlpha> {
+fn compute_interpolation_weights_impl(
+    src_size: u32,
+    dst_size: u32,
+    scale: f32,
+) -> Vec<InterpolationWeight> {
     let mut tab = Vec::new();
 
-    for dx in 0..dsize {
-        let fsx1 = dx as f32 * scale;
-        let fsx2 = fsx1 + scale;
+    for dx in 0..dst_size {
+        let src_x_start = dx as f32 * scale;
+        let src_x_end = src_x_start + scale;
 
-        let sx1 = (fsx1.ceil() as u32).min(ssize);
-        let sx2 = (fsx2.floor() as u32).min(ssize);
+        let src_x_start_int = (src_x_start.ceil() as u32).min(src_size);
+        let src_x_end_int = (src_x_end.floor() as u32).min(src_size);
 
-        let cell_width = if fsx2 - fsx1 != scale {
+        let cell_width = if src_x_end - src_x_start != scale {
             // Handle boundary cases where the footprint extends beyond image bounds
-            if sx1 == 0 {
-                sx2 as f32
-            } else if sx2 == ssize {
-                ssize as f32 - fsx1
+            if src_x_start_int == 0 {
+                src_x_end_int as f32
+            } else if src_x_end_int == src_size {
+                src_size as f32 - src_x_start
             } else {
                 scale
             }
@@ -66,32 +70,32 @@ fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f32) -> Vec<DecimateAl
         };
 
         // Left partial overlap
-        if sx1 > 0 && (sx1 as f32 - fsx1) > 1e-3 {
-            let alpha = (sx1 as f32 - fsx1) / cell_width;
-            tab.push(DecimateAlpha {
-                di: dx,
-                si: sx1 - 1,
-                alpha,
+        if src_x_start_int > 0 && (src_x_start_int as f32 - src_x_start) > 1e-3 {
+            let alpha = (src_x_start_int as f32 - src_x_start) / cell_width;
+            tab.push(InterpolationWeight {
+                destination_index: dx,
+                source_index: src_x_start_int - 1,
+                weight: alpha,
             });
         }
 
         // Full overlaps
-        for sx in sx1..sx2 {
+        for sx in src_x_start_int..src_x_end_int {
             let alpha = 1.0 / cell_width;
-            tab.push(DecimateAlpha {
-                di: dx,
-                si: sx,
-                alpha,
+            tab.push(InterpolationWeight {
+                destination_index: dx,
+                source_index: sx,
+                weight: alpha,
             });
         }
 
         // Right partial overlap
-        if sx2 < ssize && (fsx2 - sx2 as f32) > 1e-3 {
-            let alpha = (fsx2 - sx2 as f32) / cell_width;
-            tab.push(DecimateAlpha {
-                di: dx,
-                si: sx2,
-                alpha,
+        if src_x_end_int < src_size && (src_x_end - src_x_end_int as f32) > 1e-3 {
+            let alpha = (src_x_end - src_x_end_int as f32) / cell_width;
+            tab.push(InterpolationWeight {
+                destination_index: dx,
+                source_index: src_x_end_int,
+                weight: alpha,
             });
         }
     }
@@ -99,8 +103,8 @@ fn compute_resize_area_tab(ssize: u32, dsize: u32, scale: f32) -> Vec<DecimateAl
     tab
 }
 
-/// Check if we can use the fast path (integer scale)
-fn is_area_fast(src_size: u32, dst_size: u32) -> bool {
+/// Check if we can use the integer scale optimization.
+fn can_use_integer_scale_impl(src_size: u32, dst_size: u32) -> bool {
     if dst_size >= src_size {
         return false;
     }
@@ -112,12 +116,12 @@ fn is_area_fast(src_size: u32, dst_size: u32) -> bool {
     (scale - int_scale as f32).abs() < f32::EPSILON && int_scale >= 2
 }
 
-/// Fast path implementation for integer scale factors
-fn resize_area_fast<I, P>(
+/// Integer scale implementation for optimized performance.
+fn resize_area_integer_scale_impl<I, P>(
     src: &I,
     dst_width: u32,
     dst_height: u32,
-) -> Result<Image<P>, ResizeAreaError>
+) -> Result<Image<P>, InterAreaError>
 where
     I: GenericImageView<Pixel = P>,
     P: Pixel,
@@ -159,12 +163,12 @@ where
     Ok(result)
 }
 
-/// General path implementation for non-integer scale factors
-fn resize_area_general<I, P>(
+/// Fractional scale implementation for arbitrary scale factors.
+fn resize_area_fractional_scale_impl<I, P>(
     src: &I,
     dst_width: u32,
     dst_height: u32,
-) -> Result<Image<P>, ResizeAreaError>
+) -> Result<Image<P>, InterAreaError>
 where
     I: GenericImageView<Pixel = P>,
     P: Pixel,
@@ -175,8 +179,8 @@ where
     let scale_y = src_height as f32 / dst_height as f32;
 
     // Compute X and Y tables
-    let xtab = compute_resize_area_tab(src_width, dst_width, scale_x);
-    let ytab = compute_resize_area_tab(src_height, dst_height, scale_y);
+    let x_weights = compute_interpolation_weights_impl(src_width, dst_width, scale_x);
+    let y_weights = compute_interpolation_weights_impl(src_height, dst_height, scale_y);
 
     let channels = P::CHANNEL_COUNT as usize;
     let mut output = ImageBuffer::new(dst_width, dst_height);
@@ -187,19 +191,19 @@ where
 
     let mut prev_dy = u32::MAX;
 
-    for y_entry in &ytab {
-        let dy = y_entry.di;
-        let sy = y_entry.si;
-        let beta = y_entry.alpha;
+    for y_entry in &y_weights {
+        let dy = y_entry.destination_index;
+        let sy = y_entry.source_index;
+        let beta = y_entry.weight;
 
         // Clear intermediate buffer
         buf.fill(0.0);
 
         // Horizontal pass
-        for x_entry in &xtab {
-            let dx = x_entry.di;
-            let sx = x_entry.si;
-            let alpha = x_entry.alpha;
+        for x_entry in &x_weights {
+            let dx = x_entry.destination_index;
+            let sx = x_entry.source_index;
+            let alpha = x_entry.weight;
 
             let src_pixel = src.get_pixel(sx, sy);
             let src_channels = src_pixel.channels();
@@ -253,8 +257,8 @@ where
 }
 
 impl InterAreaResize {
-    /// Resize image using INTER_AREA interpolation
-    pub fn resize<I, P>(&self, src: &I) -> Result<Image<P>, ResizeAreaError>
+    /// Resize image using INTER_AREA interpolation.
+    pub fn resize<I, P>(&self, src: &I) -> Result<Image<P>, InterAreaError>
     where
         I: GenericImageView<Pixel = P>,
         P: Pixel,
@@ -263,7 +267,7 @@ impl InterAreaResize {
         let (src_width, src_height) = src.dimensions();
 
         if src_width == 0 || src_height == 0 {
-            return Err(ResizeAreaError::EmptyImage {
+            return Err(InterAreaError::EmptyImage {
                 width: src_width,
                 height: src_height,
             });
@@ -273,7 +277,7 @@ impl InterAreaResize {
         if self.new_width > src_width || self.new_height > src_height {
             // For upscaling, INTER_AREA behaves like INTER_LINEAR
             // For simplicity, we'll return an error for now
-            return Err(ResizeAreaError::UpscalingNotSupported {
+            return Err(InterAreaError::UpscalingNotSupported {
                 src_width,
                 src_height,
                 target_width: self.new_width,
@@ -281,50 +285,52 @@ impl InterAreaResize {
             });
         }
 
-        // Check if we can use the fast path
-        if is_area_fast(src_width, self.new_width) && is_area_fast(src_height, self.new_height) {
-            resize_area_fast(src, self.new_width, self.new_height)
+        // Check if we can use the integer scale optimization
+        if can_use_integer_scale_impl(src_width, self.new_width)
+            && can_use_integer_scale_impl(src_height, self.new_height)
+        {
+            resize_area_integer_scale_impl(src, self.new_width, self.new_height)
         } else {
-            resize_area_general(src, self.new_width, self.new_height)
+            resize_area_fractional_scale_impl(src, self.new_width, self.new_height)
         }
     }
 }
 
-/// Extension trait for ImageBuffer to provide INTER_AREA resize methods
-pub trait InterAreaExt<P>
+/// Extension trait for ImageBuffer to provide INTER_AREA resize methods.
+pub trait InterAreaResizeExt<P>
 where
     P: Pixel,
 {
-    /// Resize image using INTER_AREA interpolation
-    fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, ResizeAreaError>
+    /// Resize image using INTER_AREA interpolation.
+    fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, InterAreaError>
     where
         Self: Sized;
 
-    /// Resize image using INTER_AREA interpolation in-place
+    /// Resize image using INTER_AREA interpolation in-place.
     fn resize_area_mut(
         &mut self,
         new_width: u32,
         new_height: u32,
-    ) -> Result<&mut Self, ResizeAreaError>;
+    ) -> Result<&mut Self, InterAreaError>;
 }
 
-impl<P> InterAreaExt<P> for Image<P>
+impl<P> InterAreaResizeExt<P> for Image<P>
 where
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
-    fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, ResizeAreaError> {
+    fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, InterAreaError> {
         let resizer = InterAreaResize::new(new_width, new_height)?;
         resizer.resize(&self)
     }
 
-    /// Hidden _mut variant that is not available for this operation
+    /// Hidden _mut variant that is not available for this operation.
     #[doc(hidden)]
     fn resize_area_mut(
         &mut self,
         _new_width: u32,
         _new_height: u32,
-    ) -> Result<&mut Self, ResizeAreaError> {
+    ) -> Result<&mut Self, InterAreaError> {
         unimplemented!(
             "resize_area_mut is not available because the operation requires creating a new image with different dimensions"
         )
@@ -337,22 +343,22 @@ mod tests {
     use image::{ImageBuffer, Rgb};
 
     #[test]
-    fn test_is_area_fast() {
-        assert!(is_area_fast(100, 50)); // 2x downscale
-        assert!(is_area_fast(150, 50)); // 3x downscale
-        assert!(!is_area_fast(100, 67)); // 1.5x downscale (not integer)
-        assert!(!is_area_fast(50, 100)); // upscale
+    fn can_use_integer_scale_impl_with_valid_cases_identifies_optimizable_scales() {
+        assert!(can_use_integer_scale_impl(100, 50)); // 2x downscale
+        assert!(can_use_integer_scale_impl(150, 50)); // 3x downscale
+        assert!(!can_use_integer_scale_impl(100, 67)); // 1.5x downscale (not integer)
+        assert!(!can_use_integer_scale_impl(50, 100)); // upscale
     }
 
     #[test]
-    fn test_compute_resize_area_tab() {
-        let tab = compute_resize_area_tab(4, 2, 2.0);
+    fn compute_interpolation_weights_impl_with_valid_input_produces_normalized_weights() {
+        let tab = compute_interpolation_weights_impl(4, 2, 2.0);
         assert!(!tab.is_empty());
 
         // Check that weights sum to 1.0 for each destination pixel
         let mut weights_sum = [0.0; 2];
         for entry in &tab {
-            weights_sum[entry.di as usize] += entry.alpha;
+            weights_sum[entry.destination_index as usize] += entry.weight;
         }
 
         for sum in weights_sum.iter() {
@@ -361,10 +367,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resize_area_fast() {
+    fn resize_area_integer_scale_impl_with_valid_input_preserves_image_structure() {
         let src = ImageBuffer::from_fn(4, 4, |x, y| Rgb([((x + y) * 50) as u8, 100, 150]));
 
-        let result = resize_area_fast(&src, 2, 2).unwrap();
+        let result = resize_area_integer_scale_impl(&src, 2, 2).unwrap();
         assert_eq!(result.dimensions(), (2, 2));
 
         // Check that result is not empty
@@ -372,10 +378,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resize_area_general() {
+    fn resize_area_fractional_scale_impl_with_valid_input_preserves_image_structure() {
         let src = ImageBuffer::from_fn(6, 6, |x, y| Rgb([((x + y) * 20) as u8, 100, 150]));
 
-        let result = resize_area_general(&src, 4, 4).unwrap();
+        let result = resize_area_fractional_scale_impl(&src, 4, 4).unwrap();
         assert_eq!(result.dimensions(), (4, 4));
 
         // Check that result is not empty
@@ -383,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inter_area_resize() {
+    fn resize_with_valid_input_produces_correct_dimensions() {
         let src = ImageBuffer::from_fn(8, 8, |x, y| Rgb([((x + y) * 16) as u8, 100, 150]));
 
         let resizer = InterAreaResize::new(4, 4).unwrap();
@@ -396,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extension_trait() {
+    fn resize_area_ext_with_valid_input_produces_correct_dimensions() {
         let src = ImageBuffer::from_fn(8, 8, |x, y| Rgb([((x + y) * 16) as u8, 100, 150]));
 
         let result = src.resize_area(4, 4).unwrap();
@@ -404,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_comprehensive_workflow() {
+    fn resize_area_with_chained_resizes_produces_correct_dimensions() {
         // Create a gradient image
         let src = ImageBuffer::from_fn(100, 100, |x, y| {
             Rgb([((x + y) as f32 / 200.0 * 255.0) as u8, 128, 192])

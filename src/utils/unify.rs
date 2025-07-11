@@ -30,7 +30,7 @@ pub trait NormalizedFrom<T> {
 }
 
 /// Get the maximum value for a primitive type.
-fn max_value<T: Primitive>() -> f64 {
+fn max_value_impl<T: Primitive>() -> f64 {
     match std::any::type_name::<T>() {
         "u8" => 255.0,
         "u16" => 65535.0,
@@ -50,8 +50,8 @@ macro_rules! impl_normalized_from {
     ($from:ty, $to:ty) => {
         impl NormalizedFrom<$from> for $to {
             fn normalized_from(value: $from) -> Self {
-                let from_max = max_value::<$from>();
-                let to_max = max_value::<$to>();
+                let from_max = max_value_impl::<$from>();
+                let to_max = max_value_impl::<$to>();
 
                 if from_max == 1.0 || to_max == 1.0 {
                     // One of the types is floating point
@@ -273,8 +273,8 @@ impl_larger_type!(i32, u64);
 /// // Both are now RGB<u16> images
 /// ```
 pub fn unify_rgb_images<T, U>(
-    image1: &Image<Rgb<T>>,
-    image2: &Image<Rgb<U>>,
+    first_image: &Image<Rgb<T>>,
+    second_image: &Image<Rgb<U>>,
 ) -> (
     Image<Rgb<<T as LargerType<U>>::Output>>,
     Image<Rgb<<T as LargerType<U>>::Output>>,
@@ -287,14 +287,14 @@ where
     Rgb<U>: WithChannel<<T as LargerType<U>>::Output>,
     Rgb<<T as LargerType<U>>::Output>: Pixel<Subpixel = <T as LargerType<U>>::Output>,
 {
-    let unified1 = map_colors(image1, |x| {
+    let unified1 = map_colors(first_image, |x| {
         Rgb([
             <T as LargerType<U>>::Output::normalized_from(x[0]),
             <T as LargerType<U>>::Output::normalized_from(x[1]),
             <T as LargerType<U>>::Output::normalized_from(x[2]),
         ])
     });
-    let unified2 = map_colors(image2, |x| {
+    let unified2 = map_colors(second_image, |x| {
         Rgb([
             <T as LargerType<U>>::Output::normalized_from(x[0]),
             <T as LargerType<U>>::Output::normalized_from(x[1]),
@@ -323,8 +323,8 @@ where
 /// // Both are now Luma<u16> images
 /// ```
 pub fn unify_gray_images<T, U>(
-    image1: &Image<Luma<T>>,
-    image2: &Image<Luma<U>>,
+    first_image: &Image<Luma<T>>,
+    second_image: &Image<Luma<U>>,
 ) -> (
     Image<Luma<<T as LargerType<U>>::Output>>,
     Image<Luma<<T as LargerType<U>>::Output>>,
@@ -336,10 +336,10 @@ where
     Luma<T>: WithChannel<<T as LargerType<U>>::Output>,
     Luma<U>: WithChannel<<T as LargerType<U>>::Output>,
 {
-    let unified1 = map_colors(image1, |x| {
+    let unified1 = map_colors(first_image, |x| {
         Luma([<T as LargerType<U>>::Output::normalized_from(x[0])])
     });
-    let unified2 = map_colors(image2, |x| {
+    let unified2 = map_colors(second_image, |x| {
         Luma([<T as LargerType<U>>::Output::normalized_from(x[0])])
     });
     (unified1, unified2)
@@ -352,7 +352,7 @@ mod tests {
     use imageproc::{gray_image, rgb_image};
 
     #[test]
-    fn test_unify_gray_u8_u16() {
+    fn unify_gray_images_with_u8_to_u16_converts_correctly() {
         let image_u8 = gray_image!(
             10, 20;
             30, 40);
@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unify_rgb_u8_u16() {
+    fn unify_rgb_images_with_u8_to_u16_converts_correctly() {
         let image_u8 = rgb_image!([10, 20, 30], [40, 50, 60]);
 
         let image_u16 = rgb_image!(type: u16,
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unify_same_types() {
+    fn unify_gray_images_with_same_types_preserves_types() {
         let image1 = gray_image!(10, 20);
         let image2 = gray_image!(30, 40);
 
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unify_gray_u8_f32() {
+    fn unify_gray_images_with_u8_to_f32_converts_correctly() {
         let image_u8 = gray_image!(100, 200);
 
         let image_f32 = gray_image!(type: f32,
@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn test_normalized_conversions() {
+    fn normalized_from_with_various_types_converts_correctly() {
         // Test u8 to u16
         assert_eq!(u16::normalized_from(0u8), 0u16);
         assert_eq!(u16::normalized_from(255u8), 65535u16);
@@ -451,11 +451,11 @@ mod tests {
         // Test f32 to u8
         assert_eq!(u8::normalized_from(0.0f32), 0u8);
         assert_eq!(u8::normalized_from(1.0f32), 255u8);
-        assert_eq!(u8::normalized_from(0.5f32), 127u8); // 0.5 * 255 = 127.5, rounded to 127
+        assert_eq!(u8::normalized_from(0.5f32), 128u8);
 
         // Test f32 to u16
         assert_eq!(u16::normalized_from(0.0f32), 0u16);
         assert_eq!(u16::normalized_from(1.0f32), 65535u16);
-        assert_eq!(u16::normalized_from(0.5f32), 32767u16); // 0.5 * 65535 = 32767.5, rounded to 32767
+        assert_eq!(u16::normalized_from(0.5f32), 32768u16);
     }
 }

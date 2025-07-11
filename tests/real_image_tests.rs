@@ -4,6 +4,9 @@
 //! works correctly with real-world image data, including file I/O operations.
 
 use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage, Rgba, RgbaImage};
+use imageops_ai::{
+    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
+};
 use std::path::{Path, PathBuf};
 
 /// Get the path to test resources directory
@@ -128,7 +131,7 @@ fn create_and_save_test_alpha_mask(filename: &str, width: u32, height: u32) -> P
 
 #[cfg(feature = "test")]
 #[test]
-fn test_load_and_process_rgb_image() {
+fn rgb_image_loading_and_processing_works() {
     // Create test image
     let image_path = create_and_save_test_rgb_image("test_rgb.png", 100, 80);
 
@@ -159,7 +162,7 @@ fn test_load_and_process_rgb_image() {
 
 #[cfg(feature = "test")]
 #[test]
-fn test_load_and_process_rgba_image() {
+fn rgba_image_loading_and_processing_works() {
     // Create test RGBA image
     let image_path = create_and_save_test_rgba_image("test_rgba.png", 80, 80);
 
@@ -189,7 +192,7 @@ fn test_load_and_process_rgba_image() {
 
 #[cfg(feature = "test")]
 #[test]
-fn test_alpha_mask_with_real_images() {
+fn alpha_mask_with_real_images_works() {
     // Create test images
     let rgb_path = create_and_save_test_rgb_image("test_rgb_for_mask.png", 60, 60);
     let mask_path = create_and_save_test_alpha_mask("test_alpha_mask.png", 60, 60);
@@ -219,7 +222,7 @@ fn test_alpha_mask_with_real_images() {
 
 #[cfg(feature = "test")]
 #[test]
-fn test_foreground_estimation_with_real_images() {
+fn foreground_estimation_with_real_images_works() {
     // Create test images with smaller size for foreground estimation
     let rgb_path = create_and_save_test_rgb_image("test_rgb_for_fg.png", 40, 40);
     let mask_path = create_and_save_test_alpha_mask("test_mask_for_fg.png", 40, 40);

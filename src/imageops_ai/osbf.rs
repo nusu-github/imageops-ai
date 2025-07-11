@@ -3,16 +3,20 @@ use imageproc::definitions::{Clamp, Image};
 
 use crate::error::OSBFilterError;
 
-/// Trait for One-Sided Box Filter implementations
-pub trait OSBFilter<P>
+/// Trait for One-Sided Box Filter implementations.
+pub trait OneSidedBoxFilterApplicator<P>
 where
     P: Pixel,
 {
-    /// Apply OSBF to the image
-    fn filter(&self, image: &Image<P>, iterations: u32) -> Result<Image<P>, OSBFilterError>;
+    /// Apply One-Sided Box Filter to the image.
+    fn one_sided_box_filter(
+        &self,
+        image: &Image<P>,
+        iterations: u32,
+    ) -> Result<Image<P>, OSBFilterError>;
 }
 
-/// One-Sided Box Filter (OSBF)
+/// One-Sided Box Filter (OSBF).
 ///
 /// This filter selects the mean value from 8 adjacent regions (4 quarter windows and 4 half windows)
 /// that is closest to the current pixel value. It's effective for edge-preserving smoothing.
@@ -21,7 +25,7 @@ pub struct OneSidedBoxFilter {
 }
 
 impl OneSidedBoxFilter {
-    /// Create a new One-Sided Box Filter
+    /// Create a new One-Sided Box Filter.
     pub const fn new(radius: u32) -> Result<Self, OSBFilterError> {
         if radius == 0 {
             return Err(OSBFilterError::InvalidRadius { radius });
@@ -29,34 +33,34 @@ impl OneSidedBoxFilter {
         Ok(Self { radius })
     }
 
-    /// Get the kernel size (2 * radius + 1)
+    /// Get the kernel size (2 * radius + 1).
     #[inline]
     pub const fn kernel_size(&self) -> u32 {
         2 * self.radius + 1
     }
 }
 
-/// Optimized helper function to pad image with edge replication
-fn pad_image<P>(image: &Image<P>, pad_size: u32) -> Image<P>
+/// Optimized helper function to pad image with edge replication.
+fn pad_image_impl<P>(image: &Image<P>, padding: u32) -> Image<P>
 where
     P: Pixel,
     P::Subpixel: Primitive,
 {
     let (width, height) = image.dimensions();
-    let new_width = width + 2 * pad_size;
-    let new_height = height + 2 * pad_size;
+    let new_width = width + 2 * padding;
+    let new_height = height + 2 * padding;
 
     // Optimized approach: use from_fn but with reduced condition branches
     ImageBuffer::from_fn(new_width, new_height, |x, y| {
-        let orig_x = x.saturating_sub(pad_size).min(width - 1);
-        let orig_y = y.saturating_sub(pad_size).min(height - 1);
+        let orig_x = x.saturating_sub(padding).min(width - 1);
+        let orig_y = y.saturating_sub(padding).min(height - 1);
         *image.get_pixel(orig_x, orig_y)
     })
 }
 
-/// Optimized box sum calculation function
+/// Optimized box sum calculation function.
 #[inline]
-fn box_sum(
+fn box_sum_impl(
     integral: &[f32],
     integral_width: usize,
     y1: usize,
@@ -70,9 +74,9 @@ fn box_sum(
         + integral[y1 * integral_width + x1]
 }
 
-/// Pre-computed region coordinates for OSBF
+/// Pre-computed region coordinates for One-Sided Box Filter.
 #[derive(Debug, Clone)]
-struct OSBFRegions {
+struct OneSidedBoxFilterRegions {
     /// Quarter window coordinates: (y1, x1, y2, x2)
     quarters: [(usize, usize, usize, usize); 4],
     /// Half window coordinates: (y1, x1, y2, x2)
@@ -81,27 +85,67 @@ struct OSBFRegions {
     half_area: f32,
 }
 
-impl OSBFRegions {
-    const fn new(py: usize, px: usize, r: usize) -> Self {
-        let py_sub_r = py.saturating_sub(r);
-        let px_sub_r = px.saturating_sub(r);
+impl OneSidedBoxFilterRegions {
+    const fn new(padded_y: usize, padded_x: usize, radius: usize) -> Self {
+        let padded_y_sub_radius = padded_y.saturating_sub(radius);
+        let padded_x_sub_radius = padded_x.saturating_sub(radius);
 
         let quarters = [
-            (py, px_sub_r, py + r + 1, px + 1),   // q1
-            (py, px, py + r + 1, px + r + 1),     // q2
-            (py_sub_r, px, py + 1, px + r + 1),   // q3
-            (py_sub_r, px_sub_r, py + 1, px + 1), // q4
+            (
+                padded_y,
+                padded_x_sub_radius,
+                padded_y + radius + 1,
+                padded_x + 1,
+            ), // q1
+            (
+                padded_y,
+                padded_x,
+                padded_y + radius + 1,
+                padded_x + radius + 1,
+            ), // q2
+            (
+                padded_y_sub_radius,
+                padded_x,
+                padded_y + 1,
+                padded_x + radius + 1,
+            ), // q3
+            (
+                padded_y_sub_radius,
+                padded_x_sub_radius,
+                padded_y + 1,
+                padded_x + 1,
+            ), // q4
         ];
 
         let halves = [
-            (py_sub_r, px_sub_r, py + r + 1, px + 1), // h1
-            (py_sub_r, px, py + r + 1, px + r + 1),   // h2
-            (py, px_sub_r, py + r + 1, px + r + 1),   // h3
-            (py_sub_r, px_sub_r, py + 1, px + r + 1), // h4
+            (
+                padded_y_sub_radius,
+                padded_x_sub_radius,
+                padded_y + radius + 1,
+                padded_x + 1,
+            ), // h1
+            (
+                padded_y_sub_radius,
+                padded_x,
+                padded_y + radius + 1,
+                padded_x + radius + 1,
+            ), // h2
+            (
+                padded_y,
+                padded_x_sub_radius,
+                padded_y + radius + 1,
+                padded_x + radius + 1,
+            ), // h3
+            (
+                padded_y_sub_radius,
+                padded_x_sub_radius,
+                padded_y + 1,
+                padded_x + radius + 1,
+            ), // h4
         ];
 
-        let quarter_area = ((r + 1) * (r + 1)) as f32;
-        let half_area = ((r + 1) * (2 * r + 1)) as f32;
+        let quarter_area = ((radius + 1) * (radius + 1)) as f32;
+        let half_area = ((radius + 1) * (2 * radius + 1)) as f32;
 
         Self {
             quarters,
@@ -112,8 +156,8 @@ impl OSBFRegions {
     }
 }
 
-/// Perform one OSBF iteration on the entire image
-fn osbf_iteration<P>(image: &Image<P>, radius: u32) -> Result<Image<P>, OSBFilterError>
+/// Perform one One-Sided Box Filter iteration on the entire image.
+fn one_sided_box_filter_impl<P>(image: &Image<P>, radius: u32) -> Result<Image<P>, OSBFilterError>
 where
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
@@ -122,19 +166,19 @@ where
     let channels = P::CHANNEL_COUNT as usize;
 
     // Pad the image
-    let padded = pad_image(image, 2);
-    let (pad_width, pad_height) = padded.dimensions();
-    let pad_size = 2;
+    let padded = pad_image_impl(image, 2);
+    let (padded_width, padded_height) = padded.dimensions();
+    let padding = 2;
 
     // Create integral images for each channel using optimized 1D layout
-    let integral_width = (pad_width + 1) as usize;
-    let integral_height = (pad_height + 1) as usize;
+    let integral_width = (padded_width + 1) as usize;
+    let integral_height = (padded_height + 1) as usize;
     let integral_size = integral_width * integral_height;
     let mut channel_integrals = vec![0.0f32; channels * integral_size];
 
     // Build integral images row by row for better cache efficiency
-    for y in 0..pad_height {
-        for x in 0..pad_width {
+    for y in 0..padded_height {
+        for x in 0..padded_width {
             let pixel = padded.get_pixel(x, y);
             let pixel_channels = pixel.channels();
 
@@ -143,11 +187,11 @@ where
             let left_idx = ((y + 1) as usize) * integral_width + (x as usize);
             let diag_idx = (y as usize) * integral_width + (x as usize);
 
-            for c in 0..channels {
-                let val: f32 = pixel_channels[c].into();
-                let base_offset = c * integral_size;
+            for channel_idx in 0..channels {
+                let value: f32 = pixel_channels[channel_idx].into();
+                let base_offset = channel_idx * integral_size;
 
-                channel_integrals[base_offset + current_idx] = val
+                channel_integrals[base_offset + current_idx] = value
                     + channel_integrals[base_offset + top_idx]
                     + channel_integrals[base_offset + left_idx]
                     - channel_integrals[base_offset + diag_idx];
@@ -156,7 +200,7 @@ where
     }
 
     // Pre-compute radius and area constants
-    let r = radius as usize;
+    let radius_usize = radius as usize;
 
     // Reusable pixel data buffer
     let mut pixel_data = Vec::with_capacity(channels);
@@ -164,48 +208,48 @@ where
     // Process image using optimized pixel mapping
     let output = ImageBuffer::from_fn(width, height, |x, y| {
         // Coordinates in padded space
-        let py = (y + pad_size as u32) as usize;
-        let px = (x + pad_size as u32) as usize;
+        let padded_y = (y + padding as u32) as usize;
+        let padded_x = (x + padding as u32) as usize;
 
         // Get current pixel value
         let current_pixel = image.get_pixel(x, y);
         let current_channels = current_pixel.channels();
 
         // Pre-compute regions for this pixel
-        let regions = OSBFRegions::new(py, px, r);
+        let regions = OneSidedBoxFilterRegions::new(padded_y, padded_x, radius_usize);
 
         pixel_data.clear();
 
-        for c in 0..channels {
-            let current_val: f32 = current_channels[c].into();
+        for channel_idx in 0..channels {
+            let current_value: f32 = current_channels[channel_idx].into();
             let mut min_diff = f32::INFINITY;
-            let mut best_val = current_val;
+            let mut best_value = current_value;
 
-            let integral_base = &channel_integrals[c * integral_size..];
+            let integral_base = &channel_integrals[channel_idx * integral_size..];
 
             // Calculate quarter windows
             for &(y1, x1, y2, x2) in &regions.quarters {
-                let val =
-                    box_sum(integral_base, integral_width, y1, x1, y2, x2) / regions.quarter_area;
-                let diff = (val - current_val).abs();
+                let value = box_sum_impl(integral_base, integral_width, y1, x1, y2, x2)
+                    / regions.quarter_area;
+                let diff = (value - current_value).abs();
                 if diff < min_diff {
                     min_diff = diff;
-                    best_val = val;
+                    best_value = value;
                 }
             }
 
             // Calculate half windows
             for &(y1, x1, y2, x2) in &regions.halves {
-                let val =
-                    box_sum(integral_base, integral_width, y1, x1, y2, x2) / regions.half_area;
-                let diff = (val - current_val).abs();
+                let value =
+                    box_sum_impl(integral_base, integral_width, y1, x1, y2, x2) / regions.half_area;
+                let diff = (value - current_value).abs();
                 if diff < min_diff {
                     min_diff = diff;
-                    best_val = val;
+                    best_value = value;
                 }
             }
 
-            pixel_data.push(P::Subpixel::clamp(best_val));
+            pixel_data.push(P::Subpixel::clamp(best_value));
         }
 
         *P::from_slice(&pixel_data)
@@ -214,12 +258,16 @@ where
     Ok(output)
 }
 
-impl<P> OSBFilter<P> for OneSidedBoxFilter
+impl<P> OneSidedBoxFilterApplicator<P> for OneSidedBoxFilter
 where
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
-    fn filter(&self, image: &Image<P>, iterations: u32) -> Result<Image<P>, OSBFilterError> {
+    fn one_sided_box_filter(
+        &self,
+        image: &Image<P>,
+        iterations: u32,
+    ) -> Result<Image<P>, OSBFilterError> {
         let (width, height) = image.dimensions();
 
         if width == 0 || height == 0 {
@@ -244,42 +292,50 @@ where
 
         // Apply filter iterations
         for _ in 0..iterations {
-            result = osbf_iteration(&result, self.radius)?;
+            result = one_sided_box_filter_impl(&result, self.radius)?;
         }
 
         Ok(result)
     }
 }
 
-/// Extension trait for ImageBuffer to provide fluent OSBF methods
-pub trait OSBFilterExt<P>
+/// Extension trait for ImageBuffer to provide fluent One-Sided Box Filter methods.
+pub trait OneSidedBoxFilterExt<P>
 where
     P: Pixel,
 {
-    /// Apply One-Sided Box Filter
-    fn osbf(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError>
+    /// Apply One-Sided Box Filter.
+    fn one_sided_box_filter(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError>
     where
         Self: Sized;
 
-    /// Apply One-Sided Box Filter in-place (not available - requires reallocation)
+    /// Apply One-Sided Box Filter in-place (not available - requires reallocation).
     #[doc(hidden)]
-    fn osbf_mut(&mut self, radius: u32, iterations: u32) -> Result<&mut Self, OSBFilterError>;
+    fn one_sided_box_filter_mut(
+        &mut self,
+        radius: u32,
+        iterations: u32,
+    ) -> Result<&mut Self, OSBFilterError>;
 }
 
-impl<P> OSBFilterExt<P> for Image<P>
+impl<P> OneSidedBoxFilterExt<P> for Image<P>
 where
     P: Pixel,
     P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
 {
-    fn osbf(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError> {
+    fn one_sided_box_filter(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError> {
         let filter = OneSidedBoxFilter::new(radius)?;
-        filter.filter(&self, iterations)
+        filter.one_sided_box_filter(&self, iterations)
     }
 
     #[doc(hidden)]
-    fn osbf_mut(&mut self, _radius: u32, _iterations: u32) -> Result<&mut Self, OSBFilterError> {
+    fn one_sided_box_filter_mut(
+        &mut self,
+        _radius: u32,
+        _iterations: u32,
+    ) -> Result<&mut Self, OSBFilterError> {
         unimplemented!(
-            "osbf_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
+            "one_sided_box_filter_mut is not available because the operation requires additional memory allocations equivalent to the owning version"
         )
     }
 }
@@ -290,12 +346,12 @@ mod tests {
     use image::{ImageBuffer, Luma, Rgb};
 
     #[test]
-    fn test_osbf_basic() {
-        let mut img = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
-        img.put_pixel(2, 2, Luma([255]));
+    fn one_sided_box_filter_with_center_pixel_smoothes_pixel() {
+        let mut image = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
+        image.put_pixel(2, 2, Luma([255]));
 
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 1).unwrap();
+        let result = filter.one_sided_box_filter(&image, 1).unwrap();
 
         // Center pixel should be smoothed
         let center = result.get_pixel(2, 2);
@@ -303,12 +359,12 @@ mod tests {
     }
 
     #[test]
-    fn test_osbf_rgb() {
-        let mut img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
-        img.put_pixel(2, 2, Rgb([255, 255, 255]));
+    fn one_sided_box_filter_with_rgb_image_smoothes_channels() {
+        let mut image = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
+        image.put_pixel(2, 2, Rgb([255, 255, 255]));
 
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 1).unwrap();
+        let result = filter.one_sided_box_filter(&image, 1).unwrap();
 
         let center = result.get_pixel(2, 2);
         assert!(center[0] > 100 && center[0] < 255);
@@ -317,13 +373,13 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_iterations() {
-        let mut img = ImageBuffer::from_pixel(7, 7, Luma([100u8]));
-        img.put_pixel(3, 3, Luma([255]));
+    fn one_sided_box_filter_with_more_iterations_produces_more_smoothing() {
+        let mut image = ImageBuffer::from_pixel(7, 7, Luma([100u8]));
+        image.put_pixel(3, 3, Luma([255]));
 
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result1 = filter.filter(&img, 1).unwrap();
-        let result5 = filter.filter(&img, 5).unwrap();
+        let result1 = filter.one_sided_box_filter(&image, 1).unwrap();
+        let result5 = filter.one_sided_box_filter(&image, 5).unwrap();
 
         // More iterations should produce more smoothing
         let center1 = result1.get_pixel(3, 3)[0];
@@ -332,21 +388,21 @@ mod tests {
     }
 
     #[test]
-    fn test_edge_preservation() {
+    fn one_sided_box_filter_with_sharp_edge_preserves_edge() {
         // Create an image with a sharp edge
-        let mut img = ImageBuffer::new(10, 10);
+        let mut image = ImageBuffer::new(10, 10);
         for y in 0..10 {
             for x in 0..10 {
                 if x < 5 {
-                    img.put_pixel(x, y, Luma([50u8]));
+                    image.put_pixel(x, y, Luma([50u8]));
                 } else {
-                    img.put_pixel(x, y, Luma([200u8]));
+                    image.put_pixel(x, y, Luma([200u8]));
                 }
             }
         }
 
         let filter = OneSidedBoxFilter::new(2).unwrap();
-        let result = filter.filter(&img, 3).unwrap();
+        let result = filter.one_sided_box_filter(&image, 3).unwrap();
 
         // Edge should be somewhat preserved
         let left_side = result.get_pixel(2, 5)[0];
@@ -356,16 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn test_extension_trait() {
-        let img = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
+    fn one_sided_box_filter_ext_with_method_chaining_enables_fluent_interface() {
+        let image = ImageBuffer::from_pixel(5, 5, Rgb([100u8, 100, 100]));
 
         // Test chaining
-        let result = img.osbf(1, 2).unwrap();
+        let result = image.one_sided_box_filter(1, 2).unwrap();
         assert_eq!(result.dimensions(), (5, 5));
     }
 
     #[test]
-    fn test_invalid_radius() {
+    fn new_with_zero_radius_returns_error() {
         let result = OneSidedBoxFilter::new(0);
         assert!(matches!(
             result,
@@ -374,10 +430,10 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_iterations() {
-        let img = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
+    fn one_sided_box_filter_with_zero_iterations_returns_error() {
+        let image = ImageBuffer::from_pixel(5, 5, Luma([100u8]));
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 0);
+        let result = filter.one_sided_box_filter(&image, 0);
         assert!(matches!(
             result,
             Err(OSBFilterError::InvalidIterations { iterations: 0 })
@@ -385,10 +441,10 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_image() {
-        let img: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(0, 0);
+    fn one_sided_box_filter_with_empty_image_returns_error() {
+        let image: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::new(0, 0);
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 1);
+        let result = filter.one_sided_box_filter(&image, 1);
         assert!(matches!(
             result,
             Err(OSBFilterError::EmptyImage {
@@ -399,10 +455,10 @@ mod tests {
     }
 
     #[test]
-    fn test_image_too_small() {
-        let img = ImageBuffer::from_pixel(2, 2, Luma([100u8]));
+    fn one_sided_box_filter_with_image_too_small_returns_error() {
+        let image = ImageBuffer::from_pixel(2, 2, Luma([100u8]));
         let filter = OneSidedBoxFilter::new(2).unwrap();
-        let result = filter.filter(&img, 1);
+        let result = filter.one_sided_box_filter(&image, 1);
         assert!(matches!(
             result,
             Err(OSBFilterError::ImageTooSmall {
@@ -414,24 +470,24 @@ mod tests {
     }
 
     #[test]
-    fn test_generic_types_u16() {
-        let mut img = ImageBuffer::from_pixel(5, 5, Luma([1000u16]));
-        img.put_pixel(2, 2, Luma([5000]));
+    fn one_sided_box_filter_with_u16_image_produces_expected_result() {
+        let mut image = ImageBuffer::from_pixel(5, 5, Luma([1000u16]));
+        image.put_pixel(2, 2, Luma([5000]));
 
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 1).unwrap();
+        let result = filter.one_sided_box_filter(&image, 1).unwrap();
 
         let center = result.get_pixel(2, 2);
         assert!(center[0] > 1000 && center[0] < 5000);
     }
 
     #[test]
-    fn test_generic_types_f32() {
-        let mut img = ImageBuffer::from_pixel(5, 5, Luma([0.5f32]));
-        img.put_pixel(2, 2, Luma([1.0]));
+    fn one_sided_box_filter_with_f32_image_produces_expected_result() {
+        let mut image = ImageBuffer::from_pixel(5, 5, Luma([0.5f32]));
+        image.put_pixel(2, 2, Luma([1.0]));
 
         let filter = OneSidedBoxFilter::new(1).unwrap();
-        let result = filter.filter(&img, 1).unwrap();
+        let result = filter.one_sided_box_filter(&image, 1).unwrap();
 
         let center = result.get_pixel(2, 2);
         assert!(center[0] > 0.5 && center[0] < 1.0);

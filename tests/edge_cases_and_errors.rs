@@ -5,7 +5,7 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaMaskError, AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding,
+    AlphaMaskError, AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding,
     PaddingError, Position,
 };
 
@@ -32,7 +32,7 @@ fn create_minimal_alpha_mask() -> Image<Luma<u8>> {
 }
 
 #[test]
-fn test_minimum_image_size_operations() {
+fn minimal_image_operations_work_correctly() {
     // Test that 1x1 images work correctly
     let image = create_minimal_rgb_image();
     let mask = create_minimal_alpha_mask();
@@ -45,34 +45,34 @@ fn test_minimum_image_size_operations() {
     // For 1x1 image, minimum radius 0 is not supported by box filter
     // Box filter requires radius > 0 and image size >= 2*radius+1
     // So we create a 3x3 image for radius 1 or use larger radius
-    let big_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([100, 150, 200]));
-    let big_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([128]));
+    let larger_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([100, 150, 200]));
+    let larger_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([128]));
 
-    let fg_result = big_image.estimate_foreground(&big_mask, 1);
+    let fg_result = larger_image.estimate_foreground(&larger_mask, 1);
     assert!(fg_result.is_ok());
     assert_eq!(fg_result.unwrap().dimensions(), (3, 3));
 }
 
 #[test]
-fn test_zero_alpha_edge_cases() {
+fn zero_alpha_mask_produces_transparent_pixel() {
     // Test with completely transparent alpha mask
     let image = create_minimal_rgb_image();
-    let mut zero_mask: Image<Luma<u8>> = Image::new(1, 1);
-    zero_mask.put_pixel(0, 0, Luma([0])); // Completely transparent
+    let mut transparent_mask: Image<Luma<u8>> = Image::new(1, 1);
+    transparent_mask.put_pixel(0, 0, Luma([0])); // Completely transparent
 
-    let result = image.apply_alpha_mask(&zero_mask).unwrap();
+    let result = image.apply_alpha_mask(&transparent_mask).unwrap();
     let pixel = result.get_pixel(0, 0);
     assert_eq!(pixel[3], 0); // Should be completely transparent
 }
 
 #[test]
-fn test_max_alpha_edge_cases() {
+fn max_alpha_mask_produces_opaque_pixel() {
     // Test with completely opaque alpha mask
     let image = create_minimal_rgb_image();
-    let mut max_mask: Image<Luma<u8>> = Image::new(1, 1);
-    max_mask.put_pixel(0, 0, Luma([255])); // Completely opaque
+    let mut opaque_mask: Image<Luma<u8>> = Image::new(1, 1);
+    opaque_mask.put_pixel(0, 0, Luma([255])); // Completely opaque
 
-    let result = image.apply_alpha_mask(&max_mask).unwrap();
+    let result = image.apply_alpha_mask(&opaque_mask).unwrap();
     let pixel = result.get_pixel(0, 0);
     assert_eq!(pixel[3], 255); // Should be completely opaque
     assert_eq!(pixel[0], 128); // RGB should be preserved
@@ -81,7 +81,7 @@ fn test_max_alpha_edge_cases() {
 }
 
 #[test]
-fn test_premultiply_extreme_values() {
+fn rgba_premultiply_handles_extreme_alpha_values() {
     // Test alpha premultiplication with extreme alpha values
     let mut image: Image<Rgba<u8>> = Image::new(3, 1);
 
@@ -95,31 +95,31 @@ fn test_premultiply_extreme_values() {
     let result = image.premultiply_alpha().unwrap();
 
     // Zero alpha should produce black
-    let zero_alpha_pixel = result.get_pixel(0, 0);
-    assert_eq!(*zero_alpha_pixel, Rgb([0, 0, 0]));
+    let transparent_pixel = result.get_pixel(0, 0);
+    assert_eq!(*transparent_pixel, Rgb([0, 0, 0]));
 
     // Max alpha should preserve color
-    let max_alpha_pixel = result.get_pixel(1, 0);
-    assert_eq!(*max_alpha_pixel, Rgb([255, 255, 255]));
+    let opaque_pixel = result.get_pixel(1, 0);
+    assert_eq!(*opaque_pixel, Rgb([255, 255, 255]));
 
     // Mid alpha should reduce color values
-    let mid_alpha_pixel = result.get_pixel(2, 0);
-    assert!(mid_alpha_pixel[0] < 255);
-    assert!(mid_alpha_pixel[1] < 255);
-    assert!(mid_alpha_pixel[2] < 255);
+    let semi_transparent_pixel = result.get_pixel(2, 0);
+    assert!(semi_transparent_pixel[0] < 255);
+    assert!(semi_transparent_pixel[1] < 255);
+    assert!(semi_transparent_pixel[2] < 255);
 }
 
 #[test]
-fn test_dimension_mismatch_errors() {
+fn mismatched_dimensions_produce_error() {
     let image = create_minimal_rgb_image(); // 1x1
-    let mut wrong_mask: Image<Luma<u8>> = Image::new(2, 2); // 2x2
-    wrong_mask.put_pixel(0, 0, Luma([128]));
-    wrong_mask.put_pixel(1, 0, Luma([128]));
-    wrong_mask.put_pixel(0, 1, Luma([128]));
-    wrong_mask.put_pixel(1, 1, Luma([128]));
+    let mut mismatched_mask: Image<Luma<u8>> = Image::new(2, 2); // 2x2
+    mismatched_mask.put_pixel(0, 0, Luma([128]));
+    mismatched_mask.put_pixel(1, 0, Luma([128]));
+    mismatched_mask.put_pixel(0, 1, Luma([128]));
+    mismatched_mask.put_pixel(1, 1, Luma([128]));
 
     // Alpha mask application should fail
-    let result = image.clone().apply_alpha_mask(&wrong_mask);
+    let result = image.clone().apply_alpha_mask(&mismatched_mask);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -127,7 +127,7 @@ fn test_dimension_mismatch_errors() {
     ));
 
     // Foreground estimation should fail
-    let fg_result = image.estimate_foreground(&wrong_mask, 1);
+    let fg_result = image.estimate_foreground(&mismatched_mask, 1);
     assert!(fg_result.is_err());
     assert!(matches!(
         fg_result.unwrap_err(),
@@ -136,7 +136,7 @@ fn test_dimension_mismatch_errors() {
 }
 
 #[test]
-fn test_padding_error_conditions() {
+fn invalid_padding_size_produces_error() {
     let image = create_minimal_rgb_image(); // 1x1
 
     // Test padding size too small (width)
@@ -165,7 +165,7 @@ fn test_padding_error_conditions() {
 }
 
 #[test]
-fn test_foreground_estimation_parameter_errors() {
+fn zero_radius_foreground_estimation_produces_error() {
     let image = create_minimal_rgb_image();
     let mask = create_minimal_alpha_mask();
 
@@ -179,7 +179,7 @@ fn test_foreground_estimation_parameter_errors() {
 }
 
 #[test]
-fn test_large_padding_values() {
+fn large_padding_values_work_correctly() {
     // Test with very large padding values
     let image = create_minimal_rgb_image(); // 1x1
 
@@ -194,30 +194,30 @@ fn test_large_padding_values() {
 }
 
 #[test]
-fn test_extreme_color_values() {
+fn extreme_rgb_values_processed_correctly() {
     // Test with extreme RGB values (all 0s, all 255s, mixed)
     let mut image: Image<Rgb<u8>> = Image::new(3, 1);
     image.put_pixel(0, 0, Rgb([0, 0, 0])); // Black
     image.put_pixel(1, 0, Rgb([255, 255, 255])); // White
     image.put_pixel(2, 0, Rgb([255, 0, 128])); // Mixed extreme
 
-    let large_mask: Image<Luma<u8>> = Image::from_fn(3, 1, |_, _| Luma([128]));
+    let uniform_mask: Image<Luma<u8>> = Image::from_fn(3, 1, |_, _| Luma([128]));
 
     // Test alpha mask application
-    let result = image.clone().apply_alpha_mask(&large_mask);
+    let result = image.clone().apply_alpha_mask(&uniform_mask);
     assert!(result.is_ok());
 
     // Test foreground estimation - create larger image for radius 1
-    let big_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([255, 255, 255]));
-    let big_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([255]));
-    let fg_result = big_image.estimate_foreground(&big_mask, 1);
+    let larger_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([255, 255, 255]));
+    let larger_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([255]));
+    let fg_result = larger_image.estimate_foreground(&larger_mask, 1);
     assert!(fg_result.is_ok());
 }
 
 #[test]
-fn test_all_padding_positions_edge_cases() {
+fn all_padding_positions_place_image_correctly() {
     let image = create_minimal_rgb_image(); // 1x1
-    let pad_size = (3, 3);
+    let target_size = (3, 3);
     let fill_color = Rgb([255, 0, 0]);
 
     let positions = [
@@ -233,11 +233,11 @@ fn test_all_padding_positions_edge_cases() {
     ];
 
     for (position, expected_pos) in positions {
-        let result = image.clone().add_padding(pad_size, position, fill_color);
+        let result = image.clone().add_padding(target_size, position, fill_color);
         assert!(result.is_ok(), "Position {:?} should work", position);
 
         if let Ok((padded, actual_pos)) = result {
-            assert_eq!(padded.dimensions(), pad_size);
+            assert_eq!(padded.dimensions(), target_size);
             assert_eq!(
                 actual_pos, expected_pos,
                 "Position calculation wrong for {:?}",
@@ -252,7 +252,7 @@ fn test_all_padding_positions_edge_cases() {
 }
 
 #[test]
-fn test_square_padding_edge_cases() {
+fn square_padding_handles_aspect_ratios_correctly() {
     // Test square padding with already square image
     let square_image: Image<Rgb<u8>> = Image::new(5, 5);
     let result = square_image.add_padding_square(Rgb([255, 255, 255]));
@@ -284,7 +284,7 @@ fn test_square_padding_edge_cases() {
 }
 
 #[test]
-fn test_complex_workflow_edge_cases() {
+fn complex_workflow_handles_edge_cases_correctly() {
     // Test complete workflow with edge case inputs - using 3x3 for radius 1
     let mut image: Image<Rgb<u8>> = Image::new(3, 3);
     image.put_pixel(0, 0, Rgb([255, 255, 255]));
@@ -330,14 +330,14 @@ fn test_complex_workflow_edge_cases() {
 }
 
 #[test]
-fn test_memory_stress_with_padding() {
+fn large_padding_operations_complete_successfully() {
     // Test that large padding operations don't cause memory issues
     let image = create_minimal_rgb_image(); // 1x1
 
     // Test progressively larger padding sizes
-    let sizes = [(10, 10), (50, 50), (100, 100)];
+    let test_sizes = [(10, 10), (50, 50), (100, 100)];
 
-    for (width, height) in sizes {
+    for (width, height) in test_sizes {
         let result =
             image
                 .clone()
@@ -361,23 +361,23 @@ fn test_memory_stress_with_padding() {
 }
 
 #[test]
-fn test_error_message_quality() {
+fn error_messages_contain_useful_information() {
     // Test that error messages contain useful information
     let image = create_minimal_rgb_image(); // 1x1
-    let wrong_mask: Image<Luma<u8>> = Image::new(5, 5); // Wrong size
+    let mismatched_mask: Image<Luma<u8>> = Image::new(5, 5); // Wrong size
 
-    let result = image.apply_alpha_mask(&wrong_mask);
+    let result = image.apply_alpha_mask(&mismatched_mask);
     assert!(result.is_err());
 
     if let Err(error) = result {
-        let error_string = format!("{}", error);
+        let error_message = format!("{}", error);
         // Error message should contain dimensional information
-        assert!(error_string.contains("1") || error_string.contains("5"));
+        assert!(error_message.contains("1") || error_message.contains("5"));
     }
 }
 
 #[test]
-fn test_numerical_precision_edge_cases() {
+fn premultiply_handles_precision_edge_cases() {
     // Test with pixel values that might cause precision issues
     let mut image: Image<Rgba<u8>> = Image::new(3, 1);
 

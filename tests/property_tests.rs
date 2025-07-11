@@ -5,7 +5,7 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
+    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
 };
 use proptest::prelude::*;
 
@@ -99,7 +99,7 @@ fn create_test_alpha_mask_with_pattern(
 proptest! {
     /// Property: Alpha premultiplication should preserve dimensions
     #[test]
-    fn alpha_premultiply_preserves_dimensions(
+    fn rgba_premultiply_preserves_dimensions(
         (width, height) in image_dimensions(),
         pixel in rgba_pixel()
     ) {
@@ -116,7 +116,7 @@ proptest! {
 
     /// Property: Alpha premultiplication with full opacity should preserve colors
     #[test]
-    fn alpha_premultiply_full_opacity_preserves_colors(
+    fn rgba_premultiply_full_opacity_preserves_colors(
         (width, height) in image_dimensions(),
         (r, g, b) in (any::<u8>(), any::<u8>(), any::<u8>())
     ) {
@@ -144,7 +144,7 @@ proptest! {
 
     /// Property: Alpha premultiplication with zero opacity should produce black
     #[test]
-    fn alpha_premultiply_zero_opacity_produces_black(
+    fn rgba_premultiply_zero_opacity_produces_black(
         (width, height) in image_dimensions(),
         (r, g, b) in (any::<u8>(), any::<u8>(), any::<u8>())
     ) {
@@ -172,7 +172,7 @@ proptest! {
 
     /// Property: Alpha mask application should preserve dimensions
     #[test]
-    fn alpha_mask_preserves_dimensions(
+    fn rgb_apply_alpha_mask_preserves_dimensions(
         (width, height) in image_dimensions(),
         rgb_pixel in rgb_pixel(),
         alpha_pixel in alpha_pixel()
@@ -186,7 +186,7 @@ proptest! {
 
     /// Property: Alpha mask with full opacity should preserve original colors
     #[test]
-    fn alpha_mask_full_opacity_preserves_colors(
+    fn rgb_apply_opaque_mask_preserves_colors(
         (width, height) in image_dimensions(),
         rgb_pixel in rgb_pixel()
     ) {
@@ -208,7 +208,7 @@ proptest! {
 
     /// Property: Alpha mask with zero opacity should produce transparent result
     #[test]
-    fn alpha_mask_zero_opacity_produces_transparent(
+    fn rgb_apply_transparent_mask_produces_transparent(
         (width, height) in image_dimensions(),
         rgb_pixel in rgb_pixel()
     ) {
@@ -227,7 +227,7 @@ proptest! {
 
     /// Property: Padding should increase image dimensions correctly
     #[test]
-    fn padding_increases_dimensions_correctly(
+    fn rgb_padding_increases_dimensions_correctly(
         (orig_width, orig_height) in image_dimensions(),
         (pad_width, pad_height) in image_dimensions(),
         position in padding_position(),
@@ -251,7 +251,7 @@ proptest! {
 
     /// Property: Square padding should make non-square images square
     #[test]
-    fn square_padding_makes_images_square(
+    fn rgb_square_padding_makes_images_square(
         (width, height) in (1u32..=10, 1u32..=10).prop_filter("not equal", |(w, h)| w != h),
         fill_color in rgb_pixel()
     ) {
@@ -269,7 +269,7 @@ proptest! {
 
     /// Property: Foreground estimation should preserve dimensions
     #[test]
-    fn foreground_estimation_preserves_dimensions(
+    fn rgb_foreground_estimation_preserves_dimensions(
         (width, height) in (5u32..=15, 5u32..=15), // Larger minimum for blur operations
         rgb_pixel in rgb_pixel(),
         alpha_pixel in alpha_pixel(),
@@ -293,7 +293,7 @@ proptest! {
 
     /// Property: Padding position calculation should be within bounds
     #[test]
-    fn padding_position_within_bounds(
+    fn rgb_padding_position_within_bounds(
         (orig_width, orig_height) in image_dimensions(),
         (pad_width, pad_height) in image_dimensions(),
         position in padding_position()
@@ -312,7 +312,7 @@ proptest! {
 
     /// Property: Combining operations should preserve essential properties
     #[test]
-    fn combined_operations_preserve_properties(
+    fn rgb_combined_operations_preserve_properties(
         (width, height) in (3u32..=8, 3u32..=8), // Small for complex operations
         rgb_pixel in rgb_pixel()
     ) {
@@ -339,7 +339,7 @@ proptest! {
 
     /// Property: Error conditions should be handled gracefully
     #[test]
-    fn padding_errors_handled_gracefully(
+    fn rgb_padding_errors_handled_gracefully(
         (width, height) in image_dimensions(),
         position in padding_position()
     ) {
@@ -356,7 +356,7 @@ proptest! {
 
     /// Property: Dimension mismatch errors should be detected
     #[test]
-    fn dimension_mismatch_detected(
+    fn rgb_dimension_mismatch_detected(
         (img_width, img_height) in image_dimensions(),
         (mask_width, mask_height) in image_dimensions()
     ) {

@@ -3,15 +3,15 @@ use imageproc::definitions::{Clamp, Image};
 
 use crate::ClipBorderError;
 
-/// Trait for clipping minimum borders from images based on content detection
+/// Trait for clipping minimum borders from images based on content detection.
 ///
 /// This trait provides functionality to automatically detect and clip
 /// the minimum boundaries of image content, removing empty borders.
 ///
 /// Note: This operation changes the image dimensions, so there is no `_mut` variant
 /// available. The algorithm creates a new image with different dimensions.
-pub trait ClipMinimumBorder<S> {
-    /// Clips minimum borders from the image based on content detection
+pub trait ClipMinimumBorderExt<S> {
+    /// Clips minimum borders from the image based on content detection.
     ///
     /// This consumes the original image.
     ///
@@ -30,7 +30,7 @@ pub trait ClipMinimumBorder<S> {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::ClipMinimumBorder;
+    /// use imageops_ai::ClipMinimumBorderExt;
     /// use imageproc::definitions::Image;
     /// use image::Rgb;
     ///
@@ -44,7 +44,7 @@ pub trait ClipMinimumBorder<S> {
     where
         Self: Sized;
 
-    /// Hidden _mut variant that is not available for this operation
+    /// Hidden _mut variant that is not available for this operation.
     #[doc(hidden)]
     fn clip_minimum_border_mut(
         &mut self,
@@ -58,7 +58,7 @@ pub trait ClipMinimumBorder<S> {
     }
 }
 
-impl<P, S> ClipMinimumBorder<S> for Image<P>
+impl<P, S> ClipMinimumBorderExt<S> for Image<P>
 where
     P: Pixel<Subpixel = S>,
     S: Into<f32> + Clamp<f32> + Primitive,
@@ -66,9 +66,9 @@ where
     fn clip_minimum_border(self, iterations: usize, threshold: S) -> Result<Self, ClipBorderError> {
         let mut image = self;
         for i in 0..iterations {
-            let corners = image.extract_corners();
+            let corners = image.extract_corners_impl();
             let background = &corners[i % 4];
-            let [x, y, w, h] = image.find_content_bounds(background, threshold);
+            let [x, y, w, h] = image.find_content_bounds_impl(background, threshold);
 
             if w == 0 || h == 0 {
                 return Err(ClipBorderError::NoContentFound);
@@ -80,41 +80,41 @@ where
     }
 }
 
-trait ImageProcessing<P: Pixel> {
-    fn extract_corners(&self) -> [Luma<P::Subpixel>; 4];
-    fn find_content_bounds(
+trait ContentBoundsDetectionExt<P: Pixel> {
+    fn extract_corners_impl(&self) -> [Luma<P::Subpixel>; 4];
+    fn find_content_bounds_impl(
         &self,
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4];
 }
 
-impl<P> ImageProcessing<P> for Image<P>
+impl<P> ContentBoundsDetectionExt<P> for Image<P>
 where
     P: Pixel,
     P::Subpixel: Into<f32> + Clamp<f32> + Primitive,
 {
-    fn extract_corners(&self) -> [Luma<P::Subpixel>; 4] {
+    fn extract_corners_impl(&self) -> [Luma<P::Subpixel>; 4] {
         let (width, height) = self.dimensions();
         [
-            merge_alpha(self.get_pixel(0, 0).to_luma_alpha()),
-            merge_alpha(self.get_pixel(width.saturating_sub(1), 0).to_luma_alpha()),
-            merge_alpha(self.get_pixel(0, height.saturating_sub(1)).to_luma_alpha()),
-            merge_alpha(
+            merge_alpha_impl(self.get_pixel(0, 0).to_luma_alpha()),
+            merge_alpha_impl(self.get_pixel(width.saturating_sub(1), 0).to_luma_alpha()),
+            merge_alpha_impl(self.get_pixel(0, height.saturating_sub(1)).to_luma_alpha()),
+            merge_alpha_impl(
                 self.get_pixel(width.saturating_sub(1), height.saturating_sub(1))
                     .to_luma_alpha(),
             ),
         ]
     }
 
-    fn find_content_bounds(
+    fn find_content_bounds_impl(
         &self,
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4] {
-        let background_value: f32 = background[0].into();
-        let max_value: f32 = P::Subpixel::DEFAULT_MAX_VALUE.into();
-        let threshold_value: f32 = threshold.into();
+        let background: f32 = background[0].into();
+        let max: f32 = P::Subpixel::DEFAULT_MAX_VALUE.into();
+        let threshold: f32 = threshold.into();
 
         let (width, height) = self.dimensions();
         let mut bounds = [width, height, 0, 0]; // [x1, y1, x2, y2]
@@ -122,15 +122,15 @@ where
         // Directly iterate over pixels without creating intermediate difference image
         for (x, y, pixel) in self.enumerate_pixels() {
             let pixel_luma = pixel.to_luma_alpha().to_luma();
-            let pixel_value: f32 = pixel_luma[0].into();
+            let pixel: f32 = pixel_luma[0].into();
 
             // Calculate difference and check against threshold
-            let normalized_pixel = pixel_value / max_value;
-            let normalized_background = background_value / max_value;
-            let diff = (normalized_pixel - normalized_background).abs() * max_value;
+            let normalized_pixel = pixel / max;
+            let normalized_background = background / max;
+            let intensity_difference = (normalized_pixel - normalized_background).abs() * max;
 
-            if diff > threshold_value {
-                update_bounds(&mut bounds, x, y);
+            if intensity_difference > threshold {
+                update_bounds_impl(&mut bounds, x, y);
             }
         }
 
@@ -144,7 +144,7 @@ where
 }
 
 /// Generic merge_alpha function
-fn merge_alpha<S>(pixel: LumaA<S>) -> Luma<S>
+fn merge_alpha_impl<S>(pixel: LumaA<S>) -> Luma<S>
 where
     S: Primitive + Into<f32> + Clamp<f32>,
 {
@@ -156,7 +156,7 @@ where
     Luma([result])
 }
 
-fn update_bounds(bounds: &mut [u32; 4], x: u32, y: u32) {
+fn update_bounds_impl(bounds: &mut [u32; 4], x: u32, y: u32) {
     bounds[0] = bounds[0].min(x);
     bounds[1] = bounds[1].min(y);
     bounds[2] = bounds[2].max(x);
@@ -170,36 +170,36 @@ mod tests {
     use image::{LumaA, Rgb};
 
     #[test]
-    fn test_merge_alpha() {
+    fn merge_alpha_impl_with_alpha_channel_applies_alpha() {
         let pixel = LumaA([200u8, 255u8]); // Full opacity
-        let result = merge_alpha(pixel);
+        let result = merge_alpha_impl(pixel);
         assert_eq!(result[0], 200);
 
         let pixel = LumaA([200u8, 128u8]); // Half opacity
-        let result = merge_alpha(pixel);
+        let result = merge_alpha_impl(pixel);
         assert_eq!(result[0], 100); // 200 * 0.5
 
         let pixel = LumaA([200u8, 0u8]); // Transparent
-        let result = merge_alpha(pixel);
+        let result = merge_alpha_impl(pixel);
         assert_eq!(result[0], 0);
     }
 
     #[test]
-    fn test_update_bounds() {
+    fn update_bounds_impl_with_new_point_expands_bounds() {
         let mut bounds = [100u32, 100u32, 0u32, 0u32]; // [x1, y1, x2, y2]
 
-        update_bounds(&mut bounds, 50, 60);
+        update_bounds_impl(&mut bounds, 50, 60);
         assert_eq!(bounds, [50, 60, 50, 60]);
 
-        update_bounds(&mut bounds, 150, 140);
+        update_bounds_impl(&mut bounds, 150, 140);
         assert_eq!(bounds, [50, 60, 150, 140]);
 
-        update_bounds(&mut bounds, 30, 200);
+        update_bounds_impl(&mut bounds, 30, 200);
         assert_eq!(bounds, [30, 60, 150, 200]);
     }
 
     #[test]
-    fn test_extract_corners() {
+    fn extract_corners_impl_with_image_returns_four_corner_pixels() {
         let mut image: Image<Rgb<u8>> = Image::new(3, 3);
 
         // Set corner pixels
@@ -208,7 +208,7 @@ mod tests {
         image.put_pixel(0, 2, Rgb([200, 200, 200])); // Bottom-left
         image.put_pixel(2, 2, Rgb([250, 250, 250])); // Bottom-right
 
-        let corners = image.extract_corners();
+        let corners = image.extract_corners_impl();
 
         // Corners should be extracted as grayscale values
         assert_eq!(corners[0][0], 100); // Top-left
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clip_minimum_border_no_content() {
+    fn clip_minimum_border_with_no_content_returns_error() {
         // Create a uniform image (no content to clip)
         let mut image: Image<Rgb<u8>> = Image::new(10, 10);
         for y in 0..10 {
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clip_minimum_border_with_content() {
+    fn clip_minimum_border_with_content_clips_to_bounds() {
         // Create an image with a border and content in the center
         let mut image: Image<Rgb<u8>> = Image::new(5, 5);
 
