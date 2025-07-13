@@ -2,11 +2,11 @@
 //!
 //! This module implements the Blur-Fusion algorithm proposed in the following research paper:
 //!
-//! **"Approximate Fast Foreground Colour Estimation"**  
-//! IEEE International Conference on Image Processing (ICIP) 2021  
-//! Date of Conference: 19-22 September 2021  
-//! DOI: 10.1109/ICIP42928.2021.9506164  
-//! Publisher: IEEE  
+//! **"Approximate Fast Foreground Colour Estimation"**\
+//! IEEE International Conference on Image Processing (ICIP) 2021\
+//! Date of Conference: 19-22 September 2021\
+//! DOI: 10.1109/ICIP42928.2021.9506164\
+//! Publisher: IEEE\
 //! Conference Location: Anchorage, AK, USA  
 //!
 //! ## Overview
@@ -74,7 +74,6 @@
 //! - **Neighborhood radius**: Uses r=91 by default (adjusted from paper's r=90 to satisfy odd requirement)
 //! - **Iterative processing**: Blur-Fusion x2 performs 2 iterations (r=91, r=7)
 //! - **Type safety**: Safety and performance through Rust's type system
-//! - **image::imageops integration**: Leverages standard library functions for better performance
 //!
 //! ## Usage Examples
 //!
@@ -152,7 +151,7 @@ use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
 use itertools::izip;
 use libblur::{
-    box_blur_f32, BlurImage, BlurImageMut, BoxBlurParameters, FastBlurChannels, ThreadingPolicy,
+    BlurImage, BlurImageMut, BoxBlurParameters, FastBlurChannels, ThreadingPolicy, box_blur_f32,
 };
 
 use crate::{error::AlphaMaskError, utils::validate_matching_dimensions};
@@ -198,7 +197,9 @@ where
         _alpha: &Image<Luma<S>>,
         _radius: u32,
     ) -> Result<&mut Self, AlphaMaskError> {
-        unimplemented!("estimate_foreground_colors_mut is not available because the algorithm requires new buffer allocations")
+        unimplemented!(
+            "estimate_foreground_colors_mut is not available because the algorithm requires new buffer allocations"
+        )
     }
 }
 
@@ -225,7 +226,7 @@ where
 ///
 /// # Arguments
 /// * `image` - Input RGB image
-/// * `alpha` - Alpha matte (grayscale image, 0=transparent, max_value=opaque)
+/// * `alpha` - Alpha matte (grayscale image, 0=transparent, `max_value=opaque`)
 /// * `radius` - Neighborhood radius for blur operations (must be odd, paper recommended: 91)
 /// * `iterations` - Number of iterations (1=standard, 2=Blur-Fusion x2)
 ///
@@ -276,8 +277,8 @@ where
         2 => vec![91, 7], // Standard Blur-Fusion x2 radii (adjusted to odd numbers)
         _ => {
             return Err(AlphaMaskError::InvalidParameter(
-                "iterations must be 1 or 2".to_string(),
-            ))
+                "iterations must be 1 or 2".to_owned(),
+            ));
         }
     };
 
@@ -463,7 +464,7 @@ where
         blurred_fg_weighted.data.borrow().as_ref().to_vec(),
     )
     .ok_or_else(|| {
-        AlphaMaskError::BlurFusionError("Failed to create blurred foreground image".to_string())
+        AlphaMaskError::BlurFusionError("Failed to create blurred foreground image".to_owned())
     })?;
     let bg_blurred: Image<Rgb<f32>> = ImageBuffer::from_raw(
         blurred_bg_weighted.width,
@@ -471,7 +472,7 @@ where
         blurred_bg_weighted.data.borrow().as_ref().to_vec(),
     )
     .ok_or_else(|| {
-        AlphaMaskError::BlurFusionError("Failed to create blurred background image".to_string())
+        AlphaMaskError::BlurFusionError("Failed to create blurred background image".to_owned())
     })?;
     let alpha_weights_blurred: Image<Luma<f32>> = ImageBuffer::from_raw(
         blurred_alpha_weighted.width,
@@ -479,7 +480,7 @@ where
         blurred_alpha_weighted.data.borrow().as_ref().to_vec(),
     )
     .ok_or_else(|| {
-        AlphaMaskError::BlurFusionError("Failed to create blurred alpha weights image".to_string())
+        AlphaMaskError::BlurFusionError("Failed to create blurred alpha weights image".to_owned())
     })?;
     let beta_weights_blurred: Image<Luma<f32>> = ImageBuffer::from_raw(
         blurred_beta_weighted.width,
@@ -487,7 +488,7 @@ where
         blurred_beta_weighted.data.borrow().as_ref().to_vec(),
     )
     .ok_or_else(|| {
-        AlphaMaskError::BlurFusionError("Failed to create blurred beta weights image".to_string())
+        AlphaMaskError::BlurFusionError("Failed to create blurred beta weights image".to_owned())
     })?;
 
     // Reconstruct final averaged images using iterators
@@ -560,13 +561,13 @@ where
 
     if radius == 0 {
         return Err(AlphaMaskError::InvalidParameter(
-            "radius must be > 0".to_string(),
+            "radius must be > 0".to_owned(),
         ));
     }
 
     if radius % 2 == 0 {
         return Err(AlphaMaskError::InvalidParameter(
-            "radius must be odd".to_string(),
+            "radius must be odd".to_owned(),
         ));
     }
 
@@ -576,14 +577,14 @@ where
     let min_dimension_required = 2 * radius + 1;
     let min_dimension = img_w.min(img_h);
     if min_dimension < min_dimension_required {
-        return Err(AlphaMaskError::InvalidParameter(
-            format!("Image dimensions ({img_w}x{img_h}) are too small for radius {radius}. Minimum required: {min_dimension_required}x{min_dimension_required}")
-        ));
+        return Err(AlphaMaskError::InvalidParameter(format!(
+            "Image dimensions ({img_w}x{img_h}) are too small for radius {radius}. Minimum required: {min_dimension_required}x{min_dimension_required}"
+        )));
     }
 
     if iterations == 0 || iterations > 2 {
         return Err(AlphaMaskError::InvalidParameter(
-            "iterations must be 1 or 2".to_string(),
+            "iterations must be 1 or 2".to_owned(),
         ));
     }
 
@@ -616,7 +617,7 @@ mod tests {
     fn estimate_foreground_colors_succeeds_on_valid_input() {
         let (image, alpha) = create_basic_4x4_image_and_alpha();
         let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[test]
@@ -631,7 +632,7 @@ mod tests {
         let image = create_large_test_image(4, 4);
         let alpha = Image::from_pixel(4, 4, Luma([200]));
         let result = image.estimate_foreground_colors(&alpha, 1);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[test]
@@ -647,7 +648,7 @@ mod tests {
         let image = create_large_test_image(193, 193);
         let alpha = Image::from_fn(193, 193, |x, y| Luma([((x + y) * 255 / 384) as u8]));
         let result = estimate_foreground_colors(&image, &alpha, 91, 2);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[test]
@@ -663,7 +664,7 @@ mod tests {
         let image = create_large_test_image(4, 4);
         let alpha = Image::from_pixel(4, 4, Luma([0]));
         let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[test]
@@ -671,7 +672,7 @@ mod tests {
         let image: Image<Rgb<f32>> = Image::from_pixel(4, 4, Rgb([0.5, 0.7, 0.9]));
         let alpha: Image<Luma<f32>> = Image::from_pixel(4, 4, Luma([0.5]));
         let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     // --- Error Cases ---

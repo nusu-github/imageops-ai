@@ -36,6 +36,7 @@ impl OneSidedBoxFilter {
 
     /// Get the kernel size (2 * radius + 1).
     #[inline]
+    #[must_use]
     pub const fn kernel_size(&self) -> u32 {
         2 * self.radius + 1
     }
@@ -300,7 +301,7 @@ where
     }
 }
 
-/// Extension trait for ImageBuffer to provide fluent One-Sided Box Filter methods.
+/// Extension trait for `ImageBuffer` to provide fluent One-Sided Box Filter methods.
 pub trait OneSidedBoxFilterExt<P>
 where
     P: Pixel,

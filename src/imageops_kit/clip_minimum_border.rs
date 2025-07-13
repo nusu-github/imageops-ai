@@ -54,7 +54,9 @@ pub trait ClipMinimumBorderExt<S> {
     where
         Self: Sized,
     {
-        unimplemented!("clip_minimum_border_mut is not available because the operation changes image dimensions")
+        unimplemented!(
+            "clip_minimum_border_mut is not available because the operation changes image dimensions"
+        )
     }
 }
 
@@ -102,7 +104,7 @@ where
         let last_y = height.saturating_sub(1);
 
         let corners = [(0, 0), (last_x, 0), (0, last_y), (last_x, last_y)];
-        std::array::from_fn(|i| {
+        core::array::from_fn(|i| {
             let (x, y) = corners[i];
             merge_alpha_impl(self.get_pixel(x, y).to_luma_alpha())
         })
@@ -144,7 +146,7 @@ where
     }
 }
 
-/// Generic merge_alpha function
+/// Generic `merge_alpha` function
 fn merge_alpha_impl<S>(pixel: LumaA<S>) -> Luma<S>
 where
     S: Clamp<f32> + Primitive,
@@ -311,7 +313,7 @@ mod tests {
         let result = image.clip_minimum_border(1, 50u8);
 
         // 1x1 image should result in NoContentFound or similar error
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]

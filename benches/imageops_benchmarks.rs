@@ -3,14 +3,15 @@
 //! This benchmark suite measures the performance of all major operations
 //! to ensure they meet performance expectations and to track regressions.
 
-use criterion::*;
+use core::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use image::{Luma, Rgb, Rgba};
 use imageops_kit::{
     ApplyAlphaMaskExt, ForegroundEstimationExt, Image, InterAreaResizeExt, PaddingExt, Position,
     PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt,
 };
 use itertools::iproduct;
-use std::hint::black_box;
 
 /// Helper function to create a test RGB image with specific dimensions
 fn create_rgb_image(width: u32, height: u32) -> Image<Rgb<u8>> {
@@ -79,12 +80,12 @@ fn bench_alpha_premultiply(c: &mut Criterion) {
 
     for (width, height) in sizes {
         let pixels = width * height;
-        group.throughput(Throughput::Elements(pixels as u64));
+        group.throughput(Throughput::Elements(u64::from(pixels)));
 
         let image = create_rgba_image(width, height);
 
         group.bench_with_input(
-            BenchmarkId::new("premultiply_alpha", format!("{}x{}", width, height)),
+            BenchmarkId::new("premultiply_alpha", format!("{width}x{height}")),
             &image,
             |b, img| b.iter(|| black_box(img.clone().premultiply_alpha_and_keep().unwrap())),
         );
@@ -107,16 +108,16 @@ fn bench_alpha_mask_application(c: &mut Criterion) {
 
     for (width, height) in sizes {
         let pixels = width * height;
-        group.throughput(Throughput::Elements(pixels as u64));
+        group.throughput(Throughput::Elements(u64::from(pixels)));
 
         let image = create_rgb_image(width, height);
         let mask = create_alpha_mask(width, height);
 
         group.bench_with_input(
-            BenchmarkId::new("apply_alpha_mask", format!("{}x{}", width, height)),
+            BenchmarkId::new("apply_alpha_mask", format!("{width}x{height}")),
             &(image, mask),
             |b, (img, alpha_mask)| {
-                b.iter(|| black_box(img.clone().apply_alpha_mask(alpha_mask).unwrap()))
+                b.iter(|| black_box(img.clone().apply_alpha_mask(alpha_mask).unwrap()));
             },
         );
     }
@@ -140,16 +141,13 @@ fn bench_foreground_estimation(c: &mut Criterion) {
     for (width, height) in sizes {
         for radius in &radii {
             let pixels = width * height;
-            group.throughput(Throughput::Elements(pixels as u64));
+            group.throughput(Throughput::Elements(u64::from(pixels)));
 
             let image = create_rgb_image(width, height);
             let mask = create_alpha_mask(width, height);
 
             group.bench_with_input(
-                BenchmarkId::new(
-                    "estimate_foreground",
-                    format!("{}x{}_r{}", width, height, radius),
-                ),
+                BenchmarkId::new("estimate_foreground", format!("{width}x{height}_r{radius}")),
                 &(image, mask, *radius),
                 |b, (img, alpha_mask, r)| {
                     b.iter(|| {
@@ -158,7 +156,7 @@ fn bench_foreground_estimation(c: &mut Criterion) {
                                 .estimate_foreground_colors(alpha_mask, *r)
                                 .unwrap(),
                         )
-                    })
+                    });
                 },
             );
         }
@@ -181,17 +179,14 @@ fn bench_padding_operations(c: &mut Criterion) {
             let pad_width = width + 200;
             let pad_height = height + 200;
             let pixels = pad_width * pad_height;
-            group.throughput(Throughput::Elements(pixels as u64));
+            group.throughput(Throughput::Elements(u64::from(pixels)));
 
             let image = create_rgb_image(width, height);
 
             group.bench_with_input(
                 BenchmarkId::new(
                     "add_padding",
-                    format!(
-                        "{}x{}_to_{}x{}_{:?}",
-                        width, height, pad_width, pad_height, position
-                    ),
+                    format!("{width}x{height}_to_{pad_width}x{pad_height}_{position:?}"),
                 ),
                 &(image, pad_width, pad_height, *position),
                 |b, (img, pw, ph, pos)| {
@@ -201,7 +196,7 @@ fn bench_padding_operations(c: &mut Criterion) {
                                 .add_padding((*pw, *ph), *pos, Rgb([255, 255, 255]))
                                 .unwrap(),
                         )
-                    })
+                    });
                 },
             );
         }
@@ -225,12 +220,12 @@ fn bench_square_padding(c: &mut Criterion) {
     for (width, height) in rectangular_sizes {
         let max_dim = width.max(height);
         let pixels = max_dim * max_dim;
-        group.throughput(Throughput::Elements(pixels as u64));
+        group.throughput(Throughput::Elements(u64::from(pixels)));
 
         let image = create_rgb_image(width, height);
 
         group.bench_with_input(
-            BenchmarkId::new("add_padding_square", format!("{}x{}", width, height)),
+            BenchmarkId::new("add_padding_square", format!("{width}x{height}")),
             &image,
             |b, img| b.iter(|| black_box(img.clone().to_square(Rgb([0, 0, 0])).unwrap().0)),
         );
@@ -248,14 +243,14 @@ fn bench_complex_workflows(c: &mut Criterion) {
 
     for (width, height) in sizes {
         let pixels = width * height;
-        group.throughput(Throughput::Elements(pixels as u64));
+        group.throughput(Throughput::Elements(u64::from(pixels)));
 
         let image = create_rgb_image(width, height);
         let mask = create_alpha_mask(width, height);
 
         // Workflow: Foreground estimation → Alpha mask → Premultiplication → Square padding
         group.bench_with_input(
-            BenchmarkId::new("full_workflow", format!("{}x{}", width, height)),
+            BenchmarkId::new("full_workflow", format!("{width}x{height}")),
             &(image, mask),
             |b, (img, alpha_mask)| {
                 b.iter(|| {
@@ -271,7 +266,7 @@ fn bench_complex_workflows(c: &mut Criterion) {
                     let (final_result, _) = premultiplied.to_square(Rgb([255, 255, 255])).unwrap();
 
                     black_box(final_result)
-                })
+                });
             },
         );
     }
@@ -291,17 +286,17 @@ fn bench_memory_efficiency(c: &mut Criterion) {
 
     for (width, height) in large_sizes {
         let pixels = width * height;
-        group.throughput(Throughput::Elements(pixels as u64));
+        group.throughput(Throughput::Elements(u64::from(pixels)));
 
         // Test the most memory-efficient operations
         let image = create_rgb_image(width, height);
         let mask = create_alpha_mask(width, height);
 
         group.bench_with_input(
-            BenchmarkId::new("large_alpha_mask", format!("{}x{}", width, height)),
+            BenchmarkId::new("large_alpha_mask", format!("{width}x{height}")),
             &(image, mask),
             |b, (img, alpha_mask)| {
-                b.iter(|| black_box(img.clone().apply_alpha_mask(alpha_mask).unwrap()))
+                b.iter(|| black_box(img.clone().apply_alpha_mask(alpha_mask).unwrap()));
             },
         );
     }
@@ -309,7 +304,7 @@ fn bench_memory_efficiency(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark INTER_AREA resizing with integer scale factors
+/// Benchmark `INTER_AREA` resizing with integer scale factors
 fn bench_inter_area_integer_scale(c: &mut Criterion) {
     let source_sizes = vec![
         (400, 400),   // Small
@@ -334,7 +329,7 @@ fn bench_inter_area_integer_scale(c: &mut Criterion) {
             }
 
             let pixels = src_width * src_height;
-            group.throughput(Throughput::Elements(pixels as u64));
+            group.throughput(Throughput::Elements(u64::from(pixels)));
 
             let image = create_rgb_image(src_width, src_height);
 
@@ -342,8 +337,7 @@ fn bench_inter_area_integer_scale(c: &mut Criterion) {
                 BenchmarkId::new(
                     "resize_area_integer",
                     format!(
-                        "{}x{}_to_{}x{}_scale{}",
-                        src_width, src_height, dst_width, dst_height, scale_factor
+                        "{src_width}x{src_height}_to_{dst_width}x{dst_height}_scale{scale_factor}"
                     ),
                 ),
                 &(image, dst_width, dst_height),

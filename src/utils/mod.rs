@@ -3,7 +3,7 @@
 //! This module contains common functionality used across different image operations.
 
 mod unify;
-pub use unify::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
+pub use unify::{LargerType, NormalizedFrom, unify_gray_images, unify_rgb_images};
 
 use image::Primitive;
 
@@ -88,8 +88,8 @@ mod tests {
 
     #[test]
     fn validate_non_empty_image_with_valid_dimensions_accepts() {
-        assert!(validate_non_empty_image(100, 100, "test").is_ok());
-        assert!(validate_non_empty_image(1, 1, "test").is_ok());
+        validate_non_empty_image(100, 100, "test").unwrap();
+        validate_non_empty_image(1, 1, "test").unwrap();
         assert!(validate_non_empty_image(0, 100, "test").is_err());
         assert!(validate_non_empty_image(100, 0, "test").is_err());
         assert!(validate_non_empty_image(0, 0, "test").is_err());
@@ -97,8 +97,8 @@ mod tests {
 
     #[test]
     fn validate_matching_dimensions_with_matching_sizes_accepts() {
-        assert!(validate_matching_dimensions(100, 100, 100, 100, "test").is_ok());
-        assert!(validate_matching_dimensions(50, 75, 50, 75, "test").is_ok());
+        validate_matching_dimensions(100, 100, 100, 100, "test").unwrap();
+        validate_matching_dimensions(50, 75, 50, 75, "test").unwrap();
         assert!(validate_matching_dimensions(100, 100, 100, 50, "test").is_err());
         assert!(validate_matching_dimensions(100, 100, 50, 100, "test").is_err());
         assert!(validate_matching_dimensions(100, 100, 50, 50, "test").is_err());

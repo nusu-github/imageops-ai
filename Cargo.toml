@@ -1,7 +1,7 @@
 [package]
 name = "imageops-kit"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["nusu-github"]
 description = "A Rust library for image processing operations and utilities"
 license = "MIT OR Apache-2.0"
@@ -10,16 +10,17 @@ documentation = "https://docs.rs/imageops-kit"
 repository = "https://github.com/nusu-github/imageops-kit"
 keywords = ["image", "processing", "alpha", "utility", "kit"]
 categories = ["multimedia::images", "computer-vision"]
+rust-version = "1.85.1"
 
 [features]
 default = []
 
 [dependencies]
-image = { version = "0.25", default-features = false }
-imageproc = { version = "0.25", default-features = false }
-itertools = "0.14.0"
-libblur = "0.19.3"
-thiserror = "2.0"
+image = { version = "0.25.0", default-features = false }
+imageproc = { version = "0.25.0", default-features = false }
+itertools = "0.14.0" 
+libblur = "0.19.0"
+thiserror = "2.0.0"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

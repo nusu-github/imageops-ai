@@ -10,7 +10,7 @@
 //! - **Boundary Clipping**: Automatic detection and clipping of minimum boundaries
 //! - **Padding**: Smart padding at various positions
 //! - **One-Sided Box Filter**: Edge-preserving smoothing filter for image denoising
-//! - **INTER_AREA Resize**: High-quality image downscaling using OpenCV's INTER_AREA algorithm
+//! - **`INTER_AREA` Resize**: High-quality image downscaling using `OpenCV`'s `INTER_AREA` algorithm
 //!
 //! ## Example Usage
 //!
@@ -65,13 +65,15 @@ pub use error::{
 };
 pub use imageops_kit::alpha_premultiply::{PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt};
 pub use imageops_kit::apply_alpha_mask::{ApplyAlphaMaskExt, ModifyAlphaExt};
-pub use imageops_kit::blur_fusion::{estimate_foreground_colors, ForegroundEstimationExt};
+pub use imageops_kit::blur_fusion::{ForegroundEstimationExt, estimate_foreground_colors};
 pub use imageops_kit::clip_minimum_border::ClipMinimumBorderExt;
 pub use imageops_kit::inter_area::{InterAreaResize, InterAreaResizeExt, InterpolationWeight};
 pub use imageops_kit::nlmeans::NLMeansExt;
-pub use imageops_kit::osbf::{OneSidedBoxFilter, OneSidedBoxFilterApplicator, OneSidedBoxFilterExt};
-pub use imageops_kit::padding::{add_padding, calculate_position, PaddingExt, Position};
-pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
+pub use imageops_kit::osbf::{
+    OneSidedBoxFilter, OneSidedBoxFilterApplicator, OneSidedBoxFilterExt,
+};
+pub use imageops_kit::padding::{PaddingExt, Position, add_padding, calculate_position};
+pub use utils::{LargerType, NormalizedFrom, unify_gray_images, unify_rgb_images};
 
 // Re-export imageproc::definitions::Image for convenience
 pub use imageproc::definitions::Image;

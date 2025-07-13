@@ -19,15 +19,15 @@ use crate::error::NLMeansError;
 ///
 /// * `h` - Filtering parameter. Higher values remove more noise but may also remove fine details
 /// * `patch_size` - Size of the patch used for similarity comparison (must be odd)
-/// * `search_window` - Size of the search window where similar patches are searched (must be odd and > patch_size)
+/// * `search_window` - Size of the search window where similar patches are searched (must be odd and > `patch_size`)
 ///
 /// # Algorithm
 ///
 /// For each pixel p:
 /// 1. Extract a patch of size `small_window` around p (single-channel for grayscale, multi-channel for color)
 /// 2. Search for similar patches within a `search_window` around p
-/// 3. Calculate weights based on patch similarity: w = exp(-||patch_p - patch_q||² / (h² × patch_size² × channels))
-/// 4. Replace pixel value with weighted average: new_value = Σ(w × pixel_q) / Σw
+/// 3. Calculate weights based on patch similarity: `w = exp(-||patch_p - patch_q||² / (h² × patch_size² × channels))`
+/// 4. Replace pixel value with weighted average: `new_value` = Σ(w × `pixel_q`) / Σw
 ///
 /// # Examples
 ///
@@ -56,7 +56,7 @@ pub trait NLMeansExt<T> {
     ///
     /// * `h` - Filtering parameter (must be positive)
     /// * `patch_size` - Patch size for similarity comparison (must be odd positive integer)
-    /// * `search_window` - Search window size (must be odd and larger than patch_size)
+    /// * `search_window` - Search window size (must be odd and larger than `patch_size`)
     ///
     /// # Returns
     ///
@@ -66,7 +66,7 @@ pub trait NLMeansExt<T> {
     ///
     /// * `NLMeansError::InvalidWindowSize` - If window sizes are not odd positive integers
     /// * `NLMeansError::InvalidFilteringParameter` - If h is not positive
-    /// * `NLMeansError::InvalidWindowSizes` - If search_window <= patch_size
+    /// * `NLMeansError::InvalidWindowSizes` - If `search_window` <= `patch_size`
     /// * `NLMeansError::ImageTooSmall` - If image is too small for the specified window sizes
     fn nl_means(self, h: f32, patch_size: u32, search_window: u32) -> Result<Self, NLMeansError>
     where
@@ -78,7 +78,7 @@ pub trait NLMeansExt<T> {
     ///
     /// * `h` - Filtering parameter (must be positive)
     /// * `patch_size` - Patch size for similarity comparison (must be odd positive integer)
-    /// * `search_window` - Search window size (must be odd and larger than patch_size)
+    /// * `search_window` - Search window size (must be odd and larger than `patch_size`)
     ///
     /// # Returns
     ///
@@ -88,7 +88,7 @@ pub trait NLMeansExt<T> {
     ///
     /// * `NLMeansError::InvalidWindowSize` - If window sizes are not odd positive integers
     /// * `NLMeansError::InvalidFilteringParameter` - If h is not positive
-    /// * `NLMeansError::InvalidWindowSizes` - If search_window <= patch_size
+    /// * `NLMeansError::InvalidWindowSizes` - If `search_window` <= `patch_size`
     /// * `NLMeansError::ImageTooSmall` - If image is too small for the specified window sizes
     fn nl_means_mut(
         &mut self,
@@ -850,7 +850,7 @@ mod tests {
     #[test]
     fn validate_parameters_impl_with_valid_input_returns_ok() {
         // Valid parameters
-        assert!(validate_parameters_impl(10.0, 3, 7, 50, 50).is_ok());
+        validate_parameters_impl(10.0, 3, 7, 50, 50).unwrap();
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Functions for unifying images with different numeric types.
 //!
-//! This module provides functionality to take two ImageBuffers with potentially different
-//! subpixel types and return a unified ImageBuffer where both images are converted to
+//! This module provides functionality to take two `ImageBuffers` with potentially different
+//! subpixel types and return a unified `ImageBuffer` where both images are converted to
 //! the larger numeric type with proper value normalization.
 //!
 //! # Value Normalization
@@ -14,7 +14,7 @@
 
 use image::{Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::Image;
-use imageproc::map::{map_colors, WithChannel};
+use imageproc::map::{WithChannel, map_colors};
 
 type UnifiedRgbImages<T, U> = (
     Image<Rgb<<T as LargerType<U>>::Output>>,
@@ -41,14 +41,14 @@ pub trait NormalizedFrom<T> {
 
 /// Get the maximum value for a primitive type.
 fn max_value_impl<T: Primitive>() -> f64 {
-    match std::any::type_name::<T>() {
+    match core::any::type_name::<T>() {
         "u8" => 255.0,
         "u16" => 65535.0,
-        "u32" => u32::MAX as f64,
+        "u32" => f64::from(u32::MAX),
         "u64" => u64::MAX as f64,
-        "i8" => i8::MAX as f64,
-        "i16" => i16::MAX as f64,
-        "i32" => i32::MAX as f64,
+        "i8" => f64::from(i8::MAX),
+        "i16" => f64::from(i16::MAX),
+        "i32" => f64::from(i32::MAX),
         "i64" => i64::MAX as f64,
         "f32" | "f64" => 1.0,
         _ => 1.0,
@@ -182,7 +182,7 @@ impl_normalized_from!(f64, i16);
 impl_normalized_from!(f64, i32);
 impl_normalized_from!(f64, f32);
 
-/// Macro to implement LargerType for two types, where the second type is larger.
+/// Macro to implement `LargerType` for two types, where the second type is larger.
 macro_rules! impl_larger_type {
     ($smaller:ty, $larger:ty) => {
         impl LargerType<$larger> for $smaller {
@@ -194,7 +194,7 @@ macro_rules! impl_larger_type {
     };
 }
 
-/// Macro to implement LargerType for a type with itself.
+/// Macro to implement `LargerType` for a type with itself.
 macro_rules! impl_larger_type_self {
     ($type:ty) => {
         impl LargerType<$type> for $type {
@@ -282,6 +282,7 @@ impl_larger_type!(i32, u64);
 /// let (unified1, unified2) = unify_rgb_images(&image1, &image2);
 /// // Both are now RGB<u16> images
 /// ```
+#[must_use]
 pub fn unify_rgb_images<T, U>(
     first_image: &Image<Rgb<T>>,
     second_image: &Image<Rgb<U>>,
@@ -329,6 +330,7 @@ where
 /// let (unified1, unified2) = unify_gray_images(&image1, &image2);
 /// // Both are now Luma<u16> images
 /// ```
+#[must_use]
 pub fn unify_gray_images<T, U>(
     first_image: &Image<Luma<T>>,
     second_image: &Image<Luma<U>>,

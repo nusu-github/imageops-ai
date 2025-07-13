@@ -19,7 +19,8 @@ pub enum ColorConversionError {
     ///
     /// This error is returned when an operation requires images of
     /// specific dimensions but receives images with different sizes.
-    #[error("Image dimensions mismatch: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
+    #[error(
+        "Image dimensions mismatch: expected {expected_width}x{expected_height}, got {actual_width}x{actual_height}"
     )]
     DimensionMismatch {
         expected_width: u32,
@@ -61,7 +62,7 @@ pub enum AlphaMaskError {
         actual: (u32, u32),
     },
 
-    /// Failed to create ImageBuffer from processed pixels.
+    /// Failed to create `ImageBuffer` from processed pixels.
     ///
     /// This error indicates that the creation of a new image buffer
     /// failed after processing the pixel data.
@@ -283,10 +284,10 @@ pub enum OSBFilterError {
     InvalidIterations { iterations: u32 },
 }
 
-/// Error type for INTER_AREA resize operations.
+/// Error type for `INTER_AREA` resize operations.
 ///
 /// This error type represents failures that can occur during
-/// INTER_AREA resize operations.
+/// `INTER_AREA` resize operations.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum InterAreaError {
     /// Invalid target dimensions.
@@ -303,9 +304,11 @@ pub enum InterAreaError {
 
     /// Upscaling not supported.
     ///
-    /// This error occurs when attempting to upscale an image. INTER_AREA
+    /// This error occurs when attempting to upscale an image. `INTER_AREA`
     /// is primarily designed for downscaling operations.
-    #[error("Upscaling not supported. Source: ({src_width}x{src_height}), Target: ({target_width}x{target_height})")]
+    #[error(
+        "Upscaling not supported. Source: ({src_width}x{src_height}), Target: ({target_width}x{target_height})"
+    )]
     UpscalingNotSupported {
         src_width: u32,
         src_height: u32,

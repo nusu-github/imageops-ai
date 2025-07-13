@@ -220,7 +220,7 @@ mod tests {
         let image: Image<Rgb<u8>> = Image::new(10, 10);
         let mask: Image<Luma<u8>> = Image::new(10, 10);
 
-        assert!(validate_dimensions_impl(&image, &mask).is_ok());
+        validate_dimensions_impl(&image, &mask).unwrap();
 
         let mask_wrong_size: Image<Luma<u8>> = Image::new(5, 5);
         assert!(validate_dimensions_impl(&image, &mask_wrong_size).is_err());
@@ -389,7 +389,7 @@ mod tests {
 
         let result = image.apply_alpha_mask(&mask);
 
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
@@ -399,7 +399,7 @@ mod tests {
 
         let result = image.replace_alpha(&mask);
 
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
@@ -409,7 +409,7 @@ mod tests {
 
         let result = image.replace_alpha_mut(&mask);
 
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]

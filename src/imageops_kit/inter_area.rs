@@ -1,6 +1,6 @@
 use image::{ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
-use itertools::{iproduct, Itertools};
+use itertools::{Itertools, iproduct};
 
 use crate::error::InterAreaError;
 
@@ -114,15 +114,11 @@ fn create_left_partial_weight(
     cell_width: f32,
 ) -> Option<InterpolationWeight> {
     let overlap = src_x_start_int as f32 - src_x_start;
-    if src_x_start_int > 0 && overlap > 1e-3 {
-        Some(InterpolationWeight {
-            destination_index: dx,
-            source_index: src_x_start_int - 1,
-            weight: overlap / cell_width,
-        })
-    } else {
-        None
-    }
+    (src_x_start_int > 0 && overlap > 1e-3).then(|| InterpolationWeight {
+        destination_index: dx,
+        source_index: src_x_start_int - 1,
+        weight: overlap / cell_width,
+    })
 }
 
 /// Create full overlap weights using iterators.
@@ -148,15 +144,11 @@ fn create_right_partial_weight(
     cell_width: f32,
 ) -> Option<InterpolationWeight> {
     let overlap = src_x_end - src_x_end_int as f32;
-    if src_x_end_int < src_size && overlap > 1e-3 {
-        Some(InterpolationWeight {
-            destination_index: dx,
-            source_index: src_x_end_int,
-            weight: overlap / cell_width,
-        })
-    } else {
-        None
-    }
+    (src_x_end_int < src_size && overlap > 1e-3).then(|| InterpolationWeight {
+        destination_index: dx,
+        source_index: src_x_end_int,
+        weight: overlap / cell_width,
+    })
 }
 
 /// Check if we can use the integer scale optimization.
@@ -373,7 +365,7 @@ impl InterAreaResize {
     }
 }
 
-/// Extension trait for ImageBuffer to provide INTER_AREA resize methods.
+/// Extension trait for `ImageBuffer` to provide INTER_AREA resize methods.
 pub trait InterAreaResizeExt<P>
 where
     P: Pixel,
@@ -439,7 +431,7 @@ mod tests {
             weights_sum[entry.destination_index as usize] += entry.weight;
         }
 
-        for sum in weights_sum.iter() {
+        for sum in &weights_sum {
             assert!((sum - 1.0).abs() < 1e-6);
         }
     }
@@ -531,7 +523,7 @@ mod tests {
         let src: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(0, 100);
         let resizer = InterAreaResize::new(50, 50).unwrap();
         let result = resizer.resize(&src);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
@@ -539,7 +531,7 @@ mod tests {
         let src = ImageBuffer::from_fn(10, 10, |_, _| Rgb([100u8, 100, 100]));
         let resizer = InterAreaResize::new(20, 15).unwrap();
         let result = resizer.resize(&src);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]

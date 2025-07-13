@@ -109,7 +109,7 @@ pub trait PremultiplyAlphaAndKeepExt {
         Self: Sized;
 }
 
-/// Generic fallback implementation for LumaA -> Luma conversion with alpha premultiplication
+/// Generic fallback implementation for `LumaA` -> Luma conversion with alpha premultiplication
 fn premultiply_lumaa_impl<S>(
     image: &Image<LumaA<S>>,
 ) -> Result<Image<Luma<S>>, ColorConversionError>
@@ -155,7 +155,7 @@ where
     }))
 }
 
-/// Implementation for f32 LumaA -> Luma conversion
+/// Implementation for f32 `LumaA` -> Luma conversion
 impl PremultiplyAlphaAndDropExt for Image<LumaA<f32>> {
     type Output = Image<Luma<f32>>;
 
@@ -164,7 +164,7 @@ impl PremultiplyAlphaAndDropExt for Image<LumaA<f32>> {
     }
 }
 
-/// Implementation for u16 LumaA -> Luma conversion
+/// Implementation for u16 `LumaA` -> Luma conversion
 impl PremultiplyAlphaAndDropExt for Image<LumaA<u16>> {
     type Output = Image<Luma<u16>>;
 
@@ -175,7 +175,7 @@ impl PremultiplyAlphaAndDropExt for Image<LumaA<u16>> {
     }
 }
 
-/// Optimized implementation for u8 LumaA -> Luma conversion using LUT
+/// Optimized implementation for u8 `LumaA` -> Luma conversion using LUT
 impl PremultiplyAlphaAndDropExt for Image<LumaA<u8>> {
     type Output = Image<Luma<u8>>;
 
@@ -236,7 +236,7 @@ impl PremultiplyAlphaAndDropExt for Image<Rgba<u32>> {
     }
 }
 
-/// Implementation for f32 LumaA images to premultiply while keeping alpha
+/// Implementation for f32 `LumaA` images to premultiply while keeping alpha
 impl PremultiplyAlphaAndKeepExt for Image<LumaA<f32>> {
     fn premultiply_alpha_and_keep(self) -> Result<Self, ColorConversionError> {
         validate_image_dimensions(&self)?;
@@ -272,7 +272,7 @@ impl PremultiplyAlphaAndKeepExt for Image<LumaA<f32>> {
     }
 }
 
-/// Optimized implementation for u8 LumaA images using LUT
+/// Optimized implementation for u8 `LumaA` images using LUT
 impl PremultiplyAlphaAndKeepExt for Image<LumaA<u8>> {
     fn premultiply_alpha_and_keep(self) -> Result<Self, ColorConversionError> {
         map_pixels_to_new_image(&self, |&LumaA([luminance, alpha])| {
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn validate_image_dimensions_with_empty_images_rejects() {
         let valid_image: Image<Rgb<u8>> = Image::new(10, 10);
-        assert!(validate_image_dimensions(&valid_image).is_ok());
+        validate_image_dimensions(&valid_image).unwrap();
 
         let empty_image: Image<Rgb<u8>> = Image::new(0, 0);
         assert!(validate_image_dimensions(&empty_image).is_err());
@@ -739,7 +739,7 @@ mod tests {
 
         let half_max = u32::MAX / 2;
         let result = premultiply_u32(u32::MAX, half_max);
-        assert!((result as i64 - half_max as i64).abs() <= 1); // Allow for rounding
+        assert!((i64::from(result) - i64::from(half_max)).abs() <= 1); // Allow for rounding
     }
 
     // Missing in-place operation tests
@@ -798,20 +798,20 @@ mod tests {
     fn premultiply_alpha_and_drop_with_empty_image_returns_error() {
         let empty_image: Image<Rgba<u8>> = Image::new(0, 0);
         let result = empty_image.premultiply_alpha_and_drop();
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
     fn premultiply_alpha_and_keep_with_empty_image_returns_error() {
         let empty_image: Image<LumaA<u8>> = Image::new(0, 0);
         let result = empty_image.premultiply_alpha_and_keep();
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]
     fn premultiply_alpha_and_keep_mut_with_empty_image_returns_error() {
         let mut empty_image: Image<Rgba<f32>> = Image::new(0, 0);
         let result = empty_image.premultiply_alpha_and_keep_mut();
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

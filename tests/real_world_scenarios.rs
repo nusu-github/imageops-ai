@@ -42,9 +42,9 @@ fn profile_photo_processing_workflow_works() {
         for x in 0..200 {
             if (50..250).contains(&y) && (60..140).contains(&x) {
                 // Subject area - full opacity with soft edges
-                let edge_distance = std::cmp::min(
-                    std::cmp::min(x - 60, 140 - x),
-                    std::cmp::min(y - 50, 250 - y),
+                let edge_distance = core::cmp::min(
+                    core::cmp::min(x - 60, 140 - x),
+                    core::cmp::min(y - 50, 250 - y),
                 ) as f32;
                 let alpha = if edge_distance >= 5.0 {
                     255
@@ -130,7 +130,7 @@ fn banner_creation_workflow_works() {
         .expect("Logo padding should succeed");
 
     assert_eq!(logo_padded.dimensions(), (60, 80));
-    assert_eq!(logo_pos, (0i64, 20i64)); // Vertically centered
+    assert_eq!(logo_pos, (0_i64, 20_i64)); // Vertically centered
 
     // Step 2: Pad text area to banner height
     let (text_padded, text_pos) = text_area
@@ -138,7 +138,7 @@ fn banner_creation_workflow_works() {
         .expect("Text padding should succeed");
 
     assert_eq!(text_padded.dimensions(), (200, 80));
-    assert_eq!(text_pos, (0i64, 20i64)); // Vertically centered
+    assert_eq!(text_pos, (0_i64, 20_i64)); // Vertically centered
 
     // Step 3: Create full banner by padding text area
     let (banner, banner_pos) = text_padded
@@ -146,7 +146,7 @@ fn banner_creation_workflow_works() {
         .expect("Banner creation should succeed");
 
     assert_eq!(banner.dimensions(), (320, 80));
-    assert_eq!(banner_pos, (120i64, 0i64)); // Right aligned
+    assert_eq!(banner_pos, (120_i64, 0_i64)); // Right aligned
 
     // Verify banner dimensions are correct for web banner
     assert_eq!(banner.width(), 320);
@@ -288,7 +288,7 @@ fn social_media_content_creation_works() {
         .expect("Twitter header padding should succeed");
 
     assert_eq!(twitter_header.dimensions(), (600, 200));
-    assert_eq!(twitter_pos, (150i64, 0i64)); // Horizontally centered
+    assert_eq!(twitter_pos, (150_i64, 0_i64)); // Horizontally centered
 
     // Step 3: Optimize for Stories (9:16 ratio)
     // Calculate Stories dimensions based on current width (300)
@@ -305,7 +305,7 @@ fn social_media_content_creation_works() {
         .expect("Stories padding should succeed");
 
     assert_eq!(stories_format.dimensions(), (300, 533));
-    assert_eq!(stories_pos, (0i64, 166i64)); // Vertically centered
+    assert_eq!(stories_pos, (0_i64, 166_i64)); // Vertically centered
 
     // Verify all formats maintain original content
     let original_pixel = main_image.get_pixel(150, 100);
@@ -366,7 +366,7 @@ fn ecommerce_thumbnail_generation_works() {
         // Verify centering
         let expected_x = (thumbnail_size.0 - width) / 2;
         let expected_y = (thumbnail_size.1 - height) / 2;
-        assert_eq!(position, (expected_x as i64, expected_y as i64));
+        assert_eq!(position, (i64::from(expected_x), i64::from(expected_y)));
 
         // Verify background consistency
         let bg_pixel = thumbnail.get_pixel(10, 10);
@@ -421,7 +421,7 @@ fn batch_processing_consistency_works() {
     // Verify all results have consistent dimensions and positioning
     for (processed, position) in &results {
         assert_eq!(processed.dimensions(), (100, 100));
-        assert_eq!(*position, (25i64, 25i64)); // All should be centered same way
+        assert_eq!(*position, (25_i64, 25_i64)); // All should be centered same way
     }
 
     // Verify padding areas are consistent

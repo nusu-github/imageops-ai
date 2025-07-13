@@ -167,11 +167,11 @@ fn workflow_error_propagation_works_correctly() {
 
     // This should fail due to dimension mismatch
     let result = image.clone().apply_alpha_mask(&mismatched_mask);
-    assert!(result.is_err());
+    result.unwrap_err();
 
     // Test with zero-sized padding (should fail)
     let padding_result = image.add_padding((5, 5), Position::Center, Rgb([255, 255, 255]));
-    assert!(padding_result.is_err()); // Padding size too small
+    padding_result.unwrap_err(); // Padding size too small
 }
 
 #[test]

@@ -304,8 +304,8 @@ proptest! {
         let image = create_test_rgb_image_with_pattern(orig_width, orig_height, |_, _| Rgb([0, 0, 0]));
 
         if let Ok((_, (pos_x, pos_y))) = image.add_padding((pad_width, pad_height), position, Rgb([255, 255, 255])) {
-            prop_assert!(pos_x + orig_width as i64 <= pad_width as i64);
-            prop_assert!(pos_y + orig_height as i64 <= pad_height as i64);
+            prop_assert!(pos_x + i64::from(orig_width) <= i64::from(pad_width));
+            prop_assert!(pos_y + i64::from(orig_height) <= i64::from(pad_height));
         }
     }
 

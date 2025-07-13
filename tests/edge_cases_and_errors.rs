@@ -79,9 +79,9 @@ fn rgba_premultiply_handles_extreme_alpha_values() {
 
     // Test with zero alpha
     image.put_pixel(0, 0, Rgba([255, 255, 255, 0])); // White but transparent
-                                                     // Test with max alpha
+    // Test with max alpha
     image.put_pixel(1, 0, Rgba([255, 255, 255, 255])); // White and opaque
-                                                       // Test with mid alpha
+    // Test with mid alpha
     image.put_pixel(2, 0, Rgba([255, 255, 255, 128])); // White and semi-transparent
 
     let result = image.premultiply_alpha_and_drop().unwrap();
@@ -153,7 +153,7 @@ fn invalid_padding_size_produces_error() {
 
     // Test exact same size (should work)
     let result = image.add_padding((1, 1), Position::Center, Rgb([255, 255, 255]));
-    assert!(result.is_ok());
+    result.unwrap();
 }
 
 #[test]
@@ -197,13 +197,13 @@ fn extreme_rgb_values_processed_correctly() {
 
     // Test alpha mask application
     let result = image.clone().apply_alpha_mask(&uniform_mask);
-    assert!(result.is_ok());
+    result.unwrap();
 
     // Test foreground estimation - create larger image for radius 1
     let larger_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([255, 255, 255]));
     let larger_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([255]));
     let fg_result = larger_image.estimate_foreground_colors(&larger_mask, 1);
-    assert!(fg_result.is_ok());
+    fg_result.unwrap();
 }
 
 #[test]
@@ -226,14 +226,13 @@ fn all_padding_positions_place_image_correctly() {
 
     for (position, expected_pos) in positions {
         let result = image.clone().add_padding(target_size, position, fill_color);
-        assert!(result.is_ok(), "Position {:?} should work", position);
+        assert!(result.is_ok(), "Position {position:?} should work");
 
         if let Ok((padded, actual_pos)) = result {
             assert_eq!(padded.dimensions(), target_size);
             assert_eq!(
                 actual_pos, expected_pos,
-                "Position calculation wrong for {:?}",
-                position
+                "Position calculation wrong for {position:?}"
             );
 
             // Verify original pixel is at the right location
@@ -342,12 +341,7 @@ fn large_padding_operations_complete_successfully() {
             image
                 .clone()
                 .add_padding((width, height), Position::Center, Rgb([128, 128, 128]));
-        assert!(
-            result.is_ok(),
-            "Padding to {}x{} should work",
-            width,
-            height
-        );
+        assert!(result.is_ok(), "Padding to {width}x{height} should work");
 
         let (padded, _) = result.unwrap();
         assert_eq!(padded.dimensions(), (width, height));
@@ -370,9 +364,9 @@ fn error_messages_contain_useful_information() {
     assert!(result.is_err());
 
     if let Err(error) = result {
-        let error_message = format!("{}", error);
+        let error_message = format!("{error}");
         // Error message should contain dimensional information
-        assert!(error_message.contains("1") || error_message.contains("5"));
+        assert!(error_message.contains('1') || error_message.contains('5'));
     }
 }
 
