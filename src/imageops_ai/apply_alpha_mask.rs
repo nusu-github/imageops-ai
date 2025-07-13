@@ -1,5 +1,6 @@
 use image::{GenericImageView, Luma, Pixel, Primitive, Rgb, Rgba};
 use imageproc::{definitions::Image, map::map_colors2};
+use itertools::Itertools;
 
 use crate::{error::AlphaMaskError, utils::validate_matching_dimensions};
 
@@ -15,7 +16,8 @@ pub trait ApplyAlphaMaskExt {
     type Subpixel: Primitive;
     /// Applies the specified mask to the image and generates an image with alpha channel.
     ///
-    /// This consumes the original image.
+    /// This consumes the original image and creates a new RGBA image with allocated memory.
+    /// The RGB channels are preserved while the alpha channel is set from the mask.
     ///
     /// # Arguments
     ///
@@ -62,7 +64,8 @@ pub trait ModifyAlphaExt {
     type Subpixel: Primitive;
     /// Replaces the alpha channel with the provided mask.
     ///
-    /// This consumes the original image.
+    /// This consumes the original image and creates a new RGBA image with allocated memory.
+    /// The RGB channels are preserved while only the alpha channel is replaced.
     ///
     /// # Arguments
     ///
@@ -96,6 +99,10 @@ pub trait ModifyAlphaExt {
         Self: Sized;
 
     /// Replaces the alpha channel with the provided mask in-place.
+    ///
+    /// This method modifies existing pixel data in-place without memory reallocation,
+    /// making it more efficient than `replace_alpha` for scenarios where the original
+    /// image is no longer needed.
     ///
     /// # Arguments
     ///
@@ -173,7 +180,7 @@ where
         validate_dimensions_impl(self, mask)?;
 
         self.pixels_mut()
-            .zip(mask.pixels())
+            .zip_eq(mask.pixels())
             .for_each(|(pixel, Luma([alpha]))| {
                 let Rgba([red, green, blue, _]) = *pixel;
                 *pixel = Rgba([red, green, blue, *alpha]);
@@ -220,67 +227,132 @@ mod tests {
     }
 
     #[test]
-    fn apply_alpha_mask_with_valid_mask_returns_rgba_image() {
+    fn apply_alpha_mask_red_pixel_preserves_rgb_and_applies_alpha() {
         let mut image: Image<Rgb<u8>> = Image::new(2, 2);
         let mut mask: Image<Luma<u8>> = Image::new(2, 2);
 
         image.put_pixel(0, 0, Rgb([255, 0, 0]));
-        image.put_pixel(1, 0, Rgb([0, 255, 0]));
-        image.put_pixel(0, 1, Rgb([0, 0, 255]));
-        image.put_pixel(1, 1, Rgb([255, 255, 255]));
-
         mask.put_pixel(0, 0, Luma([255]));
-        mask.put_pixel(1, 0, Luma([128]));
-        mask.put_pixel(0, 1, Luma([64]));
-        mask.put_pixel(1, 1, Luma([0]));
 
         let result = ApplyAlphaMaskExt::apply_alpha_mask(image, &mask).unwrap();
 
         assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn apply_alpha_mask_green_pixel_preserves_rgb_and_applies_alpha() {
+        let mut image: Image<Rgb<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 0, Rgb([0, 255, 0]));
+        mask.put_pixel(1, 0, Luma([128]));
+
+        let result = ApplyAlphaMaskExt::apply_alpha_mask(image, &mask).unwrap();
+
         assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
+    }
+
+    #[test]
+    fn apply_alpha_mask_blue_pixel_preserves_rgb_and_applies_alpha() {
+        let mut image: Image<Rgb<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(0, 1, Rgb([0, 0, 255]));
+        mask.put_pixel(0, 1, Luma([64]));
+
+        let result = ApplyAlphaMaskExt::apply_alpha_mask(image, &mask).unwrap();
+
         assert_eq!(result.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
+    }
+
+    #[test]
+    fn apply_alpha_mask_white_pixel_preserves_rgb_and_applies_zero_alpha() {
+        let mut image: Image<Rgb<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 1, Rgb([255, 255, 255]));
+        mask.put_pixel(1, 1, Luma([0]));
+
+        let result = ApplyAlphaMaskExt::apply_alpha_mask(image, &mask).unwrap();
+
         assert_eq!(result.get_pixel(1, 1), &Rgba([255, 255, 255, 0]));
     }
 
     #[test]
-    fn replace_alpha_with_new_mask_replaces_alpha_channel() {
+    fn replace_alpha_red_pixel_preserves_rgb_and_replaces_alpha() {
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         let mut mask: Image<Luma<u8>> = Image::new(2, 2);
 
         image.put_pixel(0, 0, Rgba([255, 0, 0, 200]));
-        image.put_pixel(1, 0, Rgba([0, 255, 0, 100]));
-        image.put_pixel(0, 1, Rgba([0, 0, 255, 50]));
-        image.put_pixel(1, 1, Rgba([255, 255, 255, 150]));
-
         mask.put_pixel(0, 0, Luma([255]));
+
+        let result = image.replace_alpha(&mask).unwrap();
+
+        assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn replace_alpha_green_pixel_preserves_rgb_and_replaces_alpha() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 0, Rgba([0, 255, 0, 100]));
         mask.put_pixel(1, 0, Luma([128]));
+
+        let result = image.replace_alpha(&mask).unwrap();
+
+        assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
+    }
+
+    #[test]
+    fn replace_alpha_blue_pixel_preserves_rgb_and_replaces_alpha() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(0, 1, Rgba([0, 0, 255, 50]));
         mask.put_pixel(0, 1, Luma([64]));
+
+        let result = image.replace_alpha(&mask).unwrap();
+
+        assert_eq!(result.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
+    }
+
+    #[test]
+    fn replace_alpha_white_pixel_preserves_rgb_and_replaces_alpha() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 1, Rgba([255, 255, 255, 150]));
         mask.put_pixel(1, 1, Luma([0]));
 
         let result = image.replace_alpha(&mask).unwrap();
 
-        // Color channels should remain unchanged, only alpha is replaced
-        assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
-        assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
-        assert_eq!(result.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
         assert_eq!(result.get_pixel(1, 1), &Rgba([255, 255, 255, 0]));
     }
 
     #[test]
-    fn replace_alpha_mut_with_new_mask_replaces_alpha_channel_in_place() {
+    fn replace_alpha_mut_red_pixel_preserves_rgb_and_replaces_alpha_in_place() {
         let mut image: Image<Rgba<u8>> = Image::new(2, 2);
         let mut mask: Image<Luma<u8>> = Image::new(2, 2);
 
         image.put_pixel(0, 0, Rgba([255, 0, 0, 200]));
-        image.put_pixel(1, 0, Rgba([0, 255, 0, 100]));
-
         mask.put_pixel(0, 0, Luma([255]));
+
+        image.replace_alpha_mut(&mask).unwrap();
+
+        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn replace_alpha_mut_green_pixel_preserves_rgb_and_replaces_alpha_in_place() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 0, Rgba([0, 255, 0, 100]));
         mask.put_pixel(1, 0, Luma([128]));
 
         image.replace_alpha_mut(&mask).unwrap();
 
-        // Color channels should remain unchanged, only alpha is replaced
-        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert_eq!(image.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
     }
 }

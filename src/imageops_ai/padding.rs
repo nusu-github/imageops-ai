@@ -1,7 +1,10 @@
 use image::{GenericImage, GenericImageView, ImageBuffer, Pixel};
 use imageproc::definitions::Image;
+use itertools::iproduct;
 
 use crate::error::PaddingError;
+
+type SquarePaddingResult = Result<((i64, i64), (u32, u32)), PaddingError>;
 
 /// Enum to specify padding position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,14 +104,13 @@ pub fn calculate_position(
 /// let padded = add_padding(&image, (20, 20), Position::Center, Rgb([255, 255, 255])).unwrap();
 /// assert_eq!(padded.dimensions(), (20, 20));
 /// ```
-pub fn add_padding<I, P>(
-    image: &I,
+pub fn add_padding<P>(
+    image: &Image<P>,
     pad_size: (u32, u32),
     position: Position,
     color: P,
 ) -> Result<Image<P>, PaddingError>
 where
-    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     let (width, height) = image.dimensions();
@@ -131,15 +133,14 @@ where
 /// 2. Iterator-based processing with bounds check elision
 /// 3. Cache-friendly access patterns
 #[inline]
-fn copy_image_impl<I, P>(
-    src: &I,
+fn copy_image_impl<P>(
+    src: &Image<P>,
     dst: &mut Image<P>,
     offset_x: i64,
     offset_y: i64,
     width: u32,
     height: u32,
 ) where
-    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     let start_x = offset_x as u32;
@@ -148,64 +149,46 @@ fn copy_image_impl<I, P>(
     // Strategy 1: Try row-wise bulk copy for contiguous memory when possible
     // This works when both source and destination have same width and
     // we're copying complete rows
-    if can_use_bulk_copy_impl(src, dst, start_x, width) {
+    if start_x == 0 && width > 64 {
         copy_rows_bulk_impl(src, dst, start_x, start_y, width, height);
         return;
     }
 
-    // Strategy 2: Row-by-row iterator processing (cache-friendly)
-    (0..height).for_each(|src_y| {
+    // Strategy 2: Coordinate-wise iterator processing (cache-friendly)
+    iproduct!(0..height, 0..width).for_each(|(src_y, src_x)| {
+        let dst_x = start_x + src_x;
         let dst_y = start_y + src_y;
-        (0..width).for_each(|src_x| {
-            let dst_x = start_x + src_x;
 
-            // Safety: Bounds validated by calculate_position
-            unsafe {
-                let pixel = src.unsafe_get_pixel(src_x, src_y);
-                dst.unsafe_put_pixel(dst_x, dst_y, pixel);
-            }
-        });
+        // Safety: Bounds validated by calculate_position
+        unsafe {
+            let pixel = src.unsafe_get_pixel(src_x, src_y);
+            dst.unsafe_put_pixel(dst_x, dst_y, pixel);
+        }
     });
-}
-
-/// Check if bulk copying is possible based on memory layout.
-#[inline]
-const fn can_use_bulk_copy_impl<I, P>(_src: &I, _dst: &Image<P>, start_x: u32, width: u32) -> bool
-where
-    I: GenericImageView<Pixel = P>,
-    P: Pixel,
-{
-    // Bulk copy is efficient when:
-    // 1. Copying starts at the beginning of destination rows (x offset = 0)
-    // 2. Source width matches copy width (copying complete rows)
-    start_x == 0 && width > 64 // Only worthwhile for larger widths
 }
 
 /// Bulk copy complete rows for maximum performance.
 #[inline]
-fn copy_rows_bulk_impl<I, P>(
-    src: &I,
+fn copy_rows_bulk_impl<P>(
+    src: &Image<P>,
     dst: &mut Image<P>,
     start_x: u32,
     start_y: u32,
     width: u32,
     height: u32,
 ) where
-    I: GenericImageView<Pixel = P>,
     P: Pixel,
 {
     // For now, fall back to optimized pixel-by-pixel copy
     // Future: Implement actual bulk memory copy when ImageBuffer exposes raw access
-    (0..height).for_each(|src_y| {
+    iproduct!(0..height, 0..width).for_each(|(src_y, src_x)| {
+        let dst_x = start_x + src_x;
         let dst_y = start_y + src_y;
-        (0..width).for_each(|src_x| {
-            let dst_x = start_x + src_x;
 
-            unsafe {
-                let pixel = src.unsafe_get_pixel(src_x, src_y);
-                dst.unsafe_put_pixel(dst_x, dst_y, pixel);
-            }
-        });
+        unsafe {
+            let pixel = src.unsafe_get_pixel(src_x, src_y);
+            dst.unsafe_put_pixel(dst_x, dst_y, pixel);
+        }
     });
 }
 
@@ -304,7 +287,7 @@ pub trait PaddingExt<P: Pixel> {
     /// Calculate position and size for square padding.
     ///
     /// This is a helper method that doesn't consume self.
-    fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError>;
+    fn calculate_square_padding(&self) -> SquarePaddingResult;
 
     /// Hidden _mut variant that is not available for this operation.
     #[doc(hidden)]
@@ -355,7 +338,7 @@ impl<P: Pixel> PaddingExt<P> for Image<P> {
         calculate_position((width, height), pad_size, position)
     }
 
-    fn calculate_square_padding(&self) -> Result<((i64, i64), (u32, u32)), PaddingError> {
+    fn calculate_square_padding(&self) -> SquarePaddingResult {
         let (width, height) = self.dimensions();
 
         let pad_size = if width > height {

@@ -3,11 +3,13 @@
 //! This benchmark suite measures the performance of all major operations
 //! to ensure they meet performance expectations and to track regressions.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::*;
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiply, ApplyAlphaMask, ForegroundEstimator, Image, Padding, Position,
+    ApplyAlphaMaskExt, ForegroundEstimationExt, Image, InterAreaResizeExt, PaddingExt, Position,
+    PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt,
 };
+use itertools::iproduct;
 use std::hint::black_box;
 
 /// Helper function to create a test RGB image with specific dimensions
@@ -15,14 +17,12 @@ fn create_rgb_image(width: u32, height: u32) -> Image<Rgb<u8>> {
     let mut image: Image<Rgb<u8>> = Image::new(width, height);
 
     // Fill with realistic pattern (gradient + content)
-    for y in 0..height {
-        for x in 0..width {
-            let r = ((x * 255) / width) as u8;
-            let g = ((y * 255) / height) as u8;
-            let b = ((x + y) * 255 / (width + height)) as u8;
-            image.put_pixel(x, y, Rgb([r, g, b]));
-        }
-    }
+    iproduct!(0..height, 0..width).for_each(|(y, x)| {
+        let r = ((x * 255) / width) as u8;
+        let g = ((y * 255) / height) as u8;
+        let b = ((x + y) * 255 / (width + height)) as u8;
+        image.put_pixel(x, y, Rgb([r, g, b]));
+    });
 
     image
 }
@@ -32,15 +32,13 @@ fn create_rgba_image(width: u32, height: u32) -> Image<Rgba<u8>> {
     let mut image: Image<Rgba<u8>> = Image::new(width, height);
 
     // Fill with semi-transparent pattern
-    for y in 0..height {
-        for x in 0..width {
-            let r = ((x * 255) / width) as u8;
-            let g = ((y * 255) / height) as u8;
-            let b = ((x + y) * 255 / (width + height)) as u8;
-            let a = if (x + y) % 3 == 0 { 128 } else { 255 }; // Varying alpha
-            image.put_pixel(x, y, Rgba([r, g, b, a]));
-        }
-    }
+    iproduct!(0..height, 0..width).for_each(|(y, x)| {
+        let r = ((x * 255) / width) as u8;
+        let g = ((y * 255) / height) as u8;
+        let b = ((x + y) * 255 / (width + height)) as u8;
+        let a = if (x + y) % 3 == 0 { 128 } else { 255 }; // Varying alpha
+        image.put_pixel(x, y, Rgba([r, g, b, a]));
+    });
 
     image
 }
@@ -54,17 +52,15 @@ fn create_alpha_mask(width: u32, height: u32) -> Image<Luma<u8>> {
     let max_radius = (width.min(height) as f32) / 2.0;
 
     // Create circular gradient mask
-    for y in 0..height {
-        for x in 0..width {
-            let distance = (x as f32 - center_x).hypot(y as f32 - center_y);
-            let alpha = if distance <= max_radius {
-                (255.0 * (1.0 - distance / max_radius)) as u8
-            } else {
-                0
-            };
-            mask.put_pixel(x, y, Luma([alpha]));
-        }
-    }
+    iproduct!(0..height, 0..width).for_each(|(y, x)| {
+        let distance = (x as f32 - center_x).hypot(y as f32 - center_y);
+        let alpha = if distance <= max_radius {
+            (255.0 * (1.0 - distance / max_radius)) as u8
+        } else {
+            0
+        };
+        mask.put_pixel(x, y, Luma([alpha]));
+    });
 
     mask
 }
@@ -90,7 +86,7 @@ fn bench_alpha_premultiply(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("premultiply_alpha", format!("{}x{}", width, height)),
             &image,
-            |b, img| b.iter(|| black_box(img.clone().premultiply_alpha().unwrap())),
+            |b, img| b.iter(|| black_box(img.clone().premultiply_alpha_and_keep().unwrap())),
         );
     }
 
@@ -136,7 +132,7 @@ fn bench_foreground_estimation(c: &mut Criterion) {
         (800, 800), // Large
     ];
 
-    let radii = vec![6, 30, 90]; // Different blur radii
+    let radii = vec![7, 31, 91]; // Different blur radii
 
     let mut group = c.benchmark_group("foreground_estimation");
     group.sample_size(10); // Fewer samples for expensive operations
@@ -156,7 +152,13 @@ fn bench_foreground_estimation(c: &mut Criterion) {
                 ),
                 &(image, mask, *radius),
                 |b, (img, alpha_mask, r)| {
-                    b.iter(|| black_box(img.clone().estimate_foreground(alpha_mask, *r).unwrap()))
+                    b.iter(|| {
+                        black_box(
+                            img.clone()
+                                .estimate_foreground_colors(alpha_mask, *r)
+                                .unwrap(),
+                        )
+                    })
                 },
             );
         }
@@ -230,7 +232,7 @@ fn bench_square_padding(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("add_padding_square", format!("{}x{}", width, height)),
             &image,
-            |b, img| b.iter(|| black_box(img.clone().add_padding_square(Rgb([0, 0, 0])).unwrap())),
+            |b, img| b.iter(|| black_box(img.clone().to_square(Rgb([0, 0, 0])).unwrap().0)),
         );
     }
 
@@ -257,15 +259,16 @@ fn bench_complex_workflows(c: &mut Criterion) {
             &(image, mask),
             |b, (img, alpha_mask)| {
                 b.iter(|| {
-                    let foreground = img.clone().estimate_foreground(alpha_mask, 30).unwrap();
+                    let foreground = img
+                        .clone()
+                        .estimate_foreground_colors(alpha_mask, 31)
+                        .unwrap();
 
                     let with_alpha = foreground.apply_alpha_mask(alpha_mask).unwrap();
 
-                    let premultiplied = with_alpha.premultiply_alpha().unwrap();
+                    let premultiplied = with_alpha.premultiply_alpha_and_drop().unwrap();
 
-                    let final_result = premultiplied
-                        .add_padding_square(Rgb([255, 255, 255]))
-                        .unwrap();
+                    let (final_result, _) = premultiplied.to_square(Rgb([255, 255, 255])).unwrap();
 
                     black_box(final_result)
                 })
@@ -306,15 +309,63 @@ fn bench_memory_efficiency(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark INTER_AREA resizing with integer scale factors
+fn bench_inter_area_integer_scale(c: &mut Criterion) {
+    let source_sizes = vec![
+        (400, 400),   // Small
+        (800, 800),   // Medium
+        (1600, 1600), // Large
+        (2000, 1000), // Rectangular
+    ];
+
+    // Integer scale factors for optimal performance path
+    let scale_factors = vec![2, 3, 4, 8];
+
+    let mut group = c.benchmark_group("inter_area_integer_scale");
+    group.sample_size(10);
+
+    for (src_width, src_height) in source_sizes {
+        for scale_factor in &scale_factors {
+            let dst_width = src_width / scale_factor;
+            let dst_height = src_height / scale_factor;
+
+            if dst_width == 0 || dst_height == 0 {
+                continue;
+            }
+
+            let pixels = src_width * src_height;
+            group.throughput(Throughput::Elements(pixels as u64));
+
+            let image = create_rgb_image(src_width, src_height);
+
+            group.bench_with_input(
+                BenchmarkId::new(
+                    "resize_area_integer",
+                    format!(
+                        "{}x{}_to_{}x{}_scale{}",
+                        src_width, src_height, dst_width, dst_height, scale_factor
+                    ),
+                ),
+                &(image, dst_width, dst_height),
+                |b, (img, w, h)| b.iter(|| black_box(img.clone().resize_area(*w, *h).unwrap())),
+            );
+        }
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    // Individual benchmarks
     bench_alpha_premultiply,
     bench_alpha_mask_application,
     bench_foreground_estimation,
     bench_padding_operations,
     bench_square_padding,
+    bench_inter_area_integer_scale,
+    // Complex workflows and memory efficiency
     bench_complex_workflows,
-    bench_memory_efficiency
+    bench_memory_efficiency,
 );
-
 criterion_main!(benches);

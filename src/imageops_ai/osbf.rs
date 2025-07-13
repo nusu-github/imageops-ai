@@ -1,5 +1,6 @@
 use image::{ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
+use itertools::iproduct;
 
 use crate::error::OSBFilterError;
 
@@ -160,7 +161,8 @@ impl OneSidedBoxFilterRegions {
 fn one_sided_box_filter_impl<P>(image: &Image<P>, radius: u32) -> Result<Image<P>, OSBFilterError>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     let (width, height) = image.dimensions();
     let channels = P::CHANNEL_COUNT as usize;
@@ -176,28 +178,26 @@ where
     let integral_size = integral_width * integral_height;
     let mut channel_integrals = vec![0.0f32; channels * integral_size];
 
-    // Build integral images row by row for better cache efficiency
-    for y in 0..padded_height {
-        for x in 0..padded_width {
-            let pixel = padded.get_pixel(x, y);
-            let pixel_channels = pixel.channels();
+    // Build integral images using coordinate pairs for better cache efficiency
+    iproduct!(0..padded_height, 0..padded_width).for_each(|(y, x)| {
+        let pixel = padded.get_pixel(x, y);
+        let pixel_channels = pixel.channels();
 
-            let current_idx = ((y + 1) as usize) * integral_width + ((x + 1) as usize);
-            let top_idx = (y as usize) * integral_width + ((x + 1) as usize);
-            let left_idx = ((y + 1) as usize) * integral_width + (x as usize);
-            let diag_idx = (y as usize) * integral_width + (x as usize);
+        let current_idx = ((y + 1) as usize) * integral_width + ((x + 1) as usize);
+        let top_idx = (y as usize) * integral_width + ((x + 1) as usize);
+        let left_idx = ((y + 1) as usize) * integral_width + (x as usize);
+        let diag_idx = (y as usize) * integral_width + (x as usize);
 
-            for channel_idx in 0..channels {
-                let value: f32 = pixel_channels[channel_idx].into();
-                let base_offset = channel_idx * integral_size;
+        for (channel_idx, &channel_value) in pixel_channels.iter().enumerate().take(channels) {
+            let value = f32::from(channel_value);
+            let base_offset = channel_idx * integral_size;
 
-                channel_integrals[base_offset + current_idx] = value
-                    + channel_integrals[base_offset + top_idx]
-                    + channel_integrals[base_offset + left_idx]
-                    - channel_integrals[base_offset + diag_idx];
-            }
+            channel_integrals[base_offset + current_idx] = value
+                + channel_integrals[base_offset + top_idx]
+                + channel_integrals[base_offset + left_idx]
+                - channel_integrals[base_offset + diag_idx];
         }
-    }
+    });
 
     // Pre-compute radius and area constants
     let radius_usize = radius as usize;
@@ -221,7 +221,7 @@ where
         pixel_data.clear();
 
         for channel_idx in 0..channels {
-            let current_value: f32 = current_channels[channel_idx].into();
+            let current_value = f32::from(current_channels[channel_idx]);
             let mut min_diff = f32::INFINITY;
             let mut best_value = current_value;
 
@@ -261,7 +261,8 @@ where
 impl<P> OneSidedBoxFilterApplicator<P> for OneSidedBoxFilter
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn one_sided_box_filter(
         &self,
@@ -321,7 +322,8 @@ where
 impl<P> OneSidedBoxFilterExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn one_sided_box_filter(self, radius: u32, iterations: u32) -> Result<Self, OSBFilterError> {
         let filter = OneSidedBoxFilter::new(radius)?;
@@ -391,15 +393,13 @@ mod tests {
     fn one_sided_box_filter_with_sharp_edge_preserves_edge() {
         // Create an image with a sharp edge
         let mut image = ImageBuffer::new(10, 10);
-        for y in 0..10 {
-            for x in 0..10 {
-                if x < 5 {
-                    image.put_pixel(x, y, Luma([50u8]));
-                } else {
-                    image.put_pixel(x, y, Luma([200u8]));
-                }
+        iproduct!(0..10, 0..10).for_each(|(y, x)| {
+            if x < 5 {
+                image.put_pixel(x, y, Luma([50u8]));
+            } else {
+                image.put_pixel(x, y, Luma([200u8]));
             }
-        }
+        });
 
         let filter = OneSidedBoxFilter::new(2).unwrap();
         let result = filter.one_sided_box_filter(&image, 3).unwrap();

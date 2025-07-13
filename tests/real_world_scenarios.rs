@@ -59,9 +59,9 @@ fn profile_photo_processing_workflow_works() {
         }
     }
 
-    // Step 1: Estimate foreground colors
+    // Step 1: Estimate foreground colors (using odd radius as required)
     let foreground = portrait
-        .estimate_foreground(&alpha_matte, 30)
+        .estimate_foreground_colors(&alpha_matte, 31)
         .expect("Foreground estimation should succeed for portrait");
 
     assert_eq!(foreground.dimensions(), (200, 300));
@@ -76,7 +76,7 @@ fn profile_photo_processing_workflow_works() {
     // Step 3: Make square for profile picture (300x300)
     // Note: We premultiply alpha first, which makes transparent areas black
     let rgb_cutout = cutout
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     let (square_profile, position) = rgb_cutout
@@ -209,9 +209,9 @@ fn product_photo_background_removal_works() {
         }
     }
 
-    // Step 1: Estimate clean foreground
+    // Step 1: Estimate clean foreground (using odd radius as required)
     let clean_product = product_photo
-        .estimate_foreground(&product_mask, 40)
+        .estimate_foreground_colors(&product_mask, 41)
         .expect("Product foreground estimation should succeed");
 
     assert_eq!(clean_product.dimensions(), (400, 400));
@@ -225,7 +225,7 @@ fn product_photo_background_removal_works() {
 
     // Step 3: Clip minimum border to remove excess whitespace
     let clipped = product_cutout
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Premultiplication should succeed");
 
     // Note: ClipMinimumBorder might not work well with our test data
@@ -265,9 +265,11 @@ fn social_media_content_creation_works() {
     }
 
     // Step 1: Optimize for Instagram post (square 1080x1080)
+    let (width, height) = main_image.dimensions();
+    let size = width.max(height);
     let (instagram_post, _) = main_image
         .clone()
-        .add_padding_square(Rgb([20, 20, 20])) // Dark padding for contrast
+        .add_padding((size, size), Position::Center, Rgb([20, 20, 20])) // Dark padding for contrast
         .expect("Instagram square padding should succeed");
 
     // Since main image is 300x200, square should be 300x300

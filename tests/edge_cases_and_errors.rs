@@ -5,22 +5,14 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaMaskError, AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding,
-    PaddingError, Position,
+    AlphaMaskError, ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingError, PaddingExt,
+    Position, PremultiplyAlphaAndDropExt,
 };
 
 /// Helper to create minimal 1x1 image
 fn create_minimal_rgb_image() -> Image<Rgb<u8>> {
     let mut image: Image<Rgb<u8>> = Image::new(1, 1);
     image.put_pixel(0, 0, Rgb([128, 128, 128]));
-    image
-}
-
-/// Helper to create minimal 1x1 RGBA image
-#[allow(dead_code)]
-fn create_minimal_rgba_image() -> Image<Rgba<u8>> {
-    let mut image: Image<Rgba<u8>> = Image::new(1, 1);
-    image.put_pixel(0, 0, Rgba([128, 128, 128, 128]));
     image
 }
 
@@ -48,7 +40,7 @@ fn minimal_image_operations_work_correctly() {
     let larger_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([100, 150, 200]));
     let larger_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([128]));
 
-    let fg_result = larger_image.estimate_foreground(&larger_mask, 1);
+    let fg_result = larger_image.estimate_foreground_colors(&larger_mask, 1);
     assert!(fg_result.is_ok());
     assert_eq!(fg_result.unwrap().dimensions(), (3, 3));
 }
@@ -92,7 +84,7 @@ fn rgba_premultiply_handles_extreme_alpha_values() {
                                                        // Test with mid alpha
     image.put_pixel(2, 0, Rgba([255, 255, 255, 128])); // White and semi-transparent
 
-    let result = image.premultiply_alpha().unwrap();
+    let result = image.premultiply_alpha_and_drop().unwrap();
 
     // Zero alpha should produce black
     let transparent_pixel = result.get_pixel(0, 0);
@@ -127,7 +119,7 @@ fn mismatched_dimensions_produce_error() {
     ));
 
     // Foreground estimation should fail
-    let fg_result = image.estimate_foreground(&mismatched_mask, 1);
+    let fg_result = image.estimate_foreground_colors(&mismatched_mask, 1);
     assert!(fg_result.is_err());
     assert!(matches!(
         fg_result.unwrap_err(),
@@ -170,7 +162,7 @@ fn zero_radius_foreground_estimation_produces_error() {
     let mask = create_minimal_alpha_mask();
 
     // Test with zero radius (should fail)
-    let result = image.estimate_foreground(&mask, 0);
+    let result = image.estimate_foreground_colors(&mask, 0);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -210,7 +202,7 @@ fn extreme_rgb_values_processed_correctly() {
     // Test foreground estimation - create larger image for radius 1
     let larger_image: Image<Rgb<u8>> = Image::from_pixel(3, 3, Rgb([255, 255, 255]));
     let larger_mask: Image<Luma<u8>> = Image::from_pixel(3, 3, Luma([255]));
-    let fg_result = larger_image.estimate_foreground(&larger_mask, 1);
+    let fg_result = larger_image.estimate_foreground_colors(&larger_mask, 1);
     assert!(fg_result.is_ok());
 }
 
@@ -255,7 +247,9 @@ fn all_padding_positions_place_image_correctly() {
 fn square_padding_handles_aspect_ratios_correctly() {
     // Test square padding with already square image
     let square_image: Image<Rgb<u8>> = Image::new(5, 5);
-    let result = square_image.add_padding_square(Rgb([255, 255, 255]));
+    let (width, height) = square_image.dimensions();
+    let size = width.max(height);
+    let result = square_image.add_padding((size, size), Position::Center, Rgb([255, 255, 255]));
     assert!(result.is_ok());
 
     if let Ok((padded, position)) = result {
@@ -265,7 +259,9 @@ fn square_padding_handles_aspect_ratios_correctly() {
 
     // Test with extreme aspect ratios
     let wide_image: Image<Rgb<u8>> = Image::new(100, 1);
-    let result = wide_image.add_padding_square(Rgb([0, 0, 0]));
+    let (width, height) = wide_image.dimensions();
+    let size = width.max(height);
+    let result = wide_image.add_padding((size, size), Position::Center, Rgb([0, 0, 0]));
     assert!(result.is_ok());
 
     if let Ok((padded, position)) = result {
@@ -274,7 +270,9 @@ fn square_padding_handles_aspect_ratios_correctly() {
     }
 
     let tall_image: Image<Rgb<u8>> = Image::new(1, 100);
-    let result = tall_image.add_padding_square(Rgb([0, 0, 0]));
+    let (width, height) = tall_image.dimensions();
+    let size = width.max(height);
+    let result = tall_image.add_padding((size, size), Position::Center, Rgb([0, 0, 0]));
     assert!(result.is_ok());
 
     if let Ok((padded, position)) = result {
@@ -310,7 +308,7 @@ fn complex_workflow_handles_edge_cases_correctly() {
 
     // Complete workflow
     let foreground = image
-        .estimate_foreground(&mask, 1)
+        .estimate_foreground_colors(&mask, 1)
         .expect("Foreground estimation should work");
 
     let with_alpha = foreground
@@ -318,11 +316,13 @@ fn complex_workflow_handles_edge_cases_correctly() {
         .expect("Alpha mask should work");
 
     let premultiplied = with_alpha
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Premultiplication should work");
 
+    let (width, height) = premultiplied.dimensions();
+    let size = width.max(height);
     let (final_result, _) = premultiplied
-        .add_padding_square(Rgb([255, 128, 0]))
+        .add_padding((size, size), Position::Center, Rgb([255, 128, 0]))
         .expect("Square padding should work");
 
     // Verify final dimensions - should be 3x3 since we started with 3x3
@@ -386,7 +386,7 @@ fn premultiply_handles_precision_edge_cases() {
     image.put_pixel(1, 0, Rgba([254, 254, 254, 254])); // Near-maximum values
     image.put_pixel(2, 0, Rgba([127, 128, 129, 127])); // Around midpoint
 
-    let result = image.premultiply_alpha();
+    let result = image.premultiply_alpha_and_drop();
     assert!(result.is_ok());
 
     // All results should be valid RGB values

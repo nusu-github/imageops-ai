@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc cc5d6d40b4c626623fb647596043b4db048365dd9efff32d73f95a57a12f97ca # shrinks to (width, height) = (1, 1), (bad_width, bad_height) = (1, 1), position = Top
 cc a8900db33bee86944f0645a13b4a3b4e1f845e19ee560d0e4ac1e52c159113b7 # shrinks to (width, height) = (5, 5), rgb_pixel = Rgb([0, 0, 0]), alpha_pixel = Luma([0]), radius = 3
+cc 5f71ac5acf8f3e566fd7a6724a9648046de662b5a252b2d6a510bac026db075a # shrinks to (width, height) = (7, 7), rgb_pixel = Rgb([0, 0, 0]), alpha_pixel = Luma([0]), radius = 2
+cc c50fd41ee48b174b4bcfd091855cb3e23015b5e5890a53dcdc81bee0ddcb6a2d # shrinks to (width, height) = (9, 9), rgb_pixel = Rgb([0, 0, 0]), alpha_pixel = Luma([0]), radius = 2

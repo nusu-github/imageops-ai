@@ -61,7 +61,8 @@ pub trait ClipMinimumBorderExt<S> {
 impl<P, S> ClipMinimumBorderExt<S> for Image<P>
 where
     P: Pixel<Subpixel = S>,
-    S: Into<f32> + Clamp<f32> + Primitive,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
     fn clip_minimum_border(self, iterations: usize, threshold: S) -> Result<Self, ClipBorderError> {
         let mut image = self;
@@ -92,19 +93,19 @@ trait ContentBoundsDetectionExt<P: Pixel> {
 impl<P> ContentBoundsDetectionExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Into<f32> + Clamp<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn extract_corners_impl(&self) -> [Luma<P::Subpixel>; 4] {
         let (width, height) = self.dimensions();
-        [
-            merge_alpha_impl(self.get_pixel(0, 0).to_luma_alpha()),
-            merge_alpha_impl(self.get_pixel(width.saturating_sub(1), 0).to_luma_alpha()),
-            merge_alpha_impl(self.get_pixel(0, height.saturating_sub(1)).to_luma_alpha()),
-            merge_alpha_impl(
-                self.get_pixel(width.saturating_sub(1), height.saturating_sub(1))
-                    .to_luma_alpha(),
-            ),
-        ]
+        let last_x = width.saturating_sub(1);
+        let last_y = height.saturating_sub(1);
+
+        let corners = [(0, 0), (last_x, 0), (0, last_y), (last_x, last_y)];
+        std::array::from_fn(|i| {
+            let (x, y) = corners[i];
+            merge_alpha_impl(self.get_pixel(x, y).to_luma_alpha())
+        })
     }
 
     fn find_content_bounds_impl(
@@ -112,9 +113,9 @@ where
         background: &Luma<P::Subpixel>,
         threshold: P::Subpixel,
     ) -> [u32; 4] {
-        let background: f32 = background[0].into();
-        let max: f32 = P::Subpixel::DEFAULT_MAX_VALUE.into();
-        let threshold: f32 = threshold.into();
+        let background: f32 = f32::from(background[0]);
+        let max: f32 = f32::from(P::Subpixel::DEFAULT_MAX_VALUE);
+        let threshold: f32 = f32::from(threshold);
 
         let (width, height) = self.dimensions();
         let mut bounds = [width, height, 0, 0]; // [x1, y1, x2, y2]
@@ -122,7 +123,7 @@ where
         // Directly iterate over pixels without creating intermediate difference image
         for (x, y, pixel) in self.enumerate_pixels() {
             let pixel_luma = pixel.to_luma_alpha().to_luma();
-            let pixel: f32 = pixel_luma[0].into();
+            let pixel: f32 = f32::from(pixel_luma[0]);
 
             // Calculate difference and check against threshold
             let normalized_pixel = pixel / max;
@@ -146,12 +147,13 @@ where
 /// Generic merge_alpha function
 fn merge_alpha_impl<S>(pixel: LumaA<S>) -> Luma<S>
 where
-    S: Primitive + Into<f32> + Clamp<f32>,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
-    let max = S::DEFAULT_MAX_VALUE.into();
+    let max = f32::from(S::DEFAULT_MAX_VALUE);
     let LumaA([l, a]) = pixel;
-    let l_f32 = l.into();
-    let a_f32 = a.into() / max;
+    let l_f32 = f32::from(l);
+    let a_f32 = f32::from(a) / max;
     let result = S::clamp(l_f32 * a_f32);
     Luma([result])
 }
@@ -168,6 +170,7 @@ mod tests {
     use super::*;
 
     use image::{LumaA, Rgb};
+    use itertools::iproduct;
 
     #[test]
     fn merge_alpha_impl_with_alpha_channel_applies_alpha() {
@@ -221,10 +224,8 @@ mod tests {
     fn clip_minimum_border_with_no_content_returns_error() {
         // Create a uniform image (no content to clip)
         let mut image: Image<Rgb<u8>> = Image::new(10, 10);
-        for y in 0..10 {
-            for x in 0..10 {
-                image.put_pixel(x, y, Rgb([100, 100, 100]));
-            }
+        for (x, y) in iproduct!(0..10, 0..10) {
+            image.put_pixel(x, y, Rgb([100, 100, 100]));
         }
 
         let result = image.clip_minimum_border(1, 50u8);
@@ -241,16 +242,14 @@ mod tests {
         let mut image: Image<Rgb<u8>> = Image::new(5, 5);
 
         // Fill with background color (corners)
-        for y in 0..5 {
-            for x in 0..5 {
-                image.put_pixel(x, y, Rgb([50, 50, 50])); // Gray background
-            }
+        for (x, y) in iproduct!(0..5, 0..5) {
+            image.put_pixel(x, y, Rgb([50, 50, 50])); // Gray background
         }
 
         // Add content in the center that's significantly different from corners
-        image.put_pixel(2, 2, Rgb([255, 255, 255])); // White content
-        image.put_pixel(1, 2, Rgb([255, 255, 255])); // More white content
-        image.put_pixel(3, 2, Rgb([255, 255, 255])); // More white content
+        for x in [1, 2, 3] {
+            image.put_pixel(x, 2, Rgb([255, 255, 255])); // White content
+        }
 
         let result = image.clip_minimum_border(1, 30u8); // Lower threshold
 

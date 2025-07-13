@@ -5,12 +5,12 @@
 
 use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use imageops_ai::{
-    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
+    ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingExt, Position,
+    PremultiplyAlphaAndDropExt,
 };
 use std::path::{Path, PathBuf};
 
 /// Get the path to test resources directory
-#[allow(dead_code)]
 fn resources_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -18,7 +18,6 @@ fn resources_dir() -> PathBuf {
 }
 
 /// Create a test RGB image with realistic content and save it as PNG
-#[allow(dead_code)]
 fn create_and_save_test_rgb_image(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut image: RgbImage = ImageBuffer::new(width, height);
 
@@ -62,7 +61,6 @@ fn create_and_save_test_rgb_image(filename: &str, width: u32, height: u32) -> Pa
 }
 
 /// Create a test RGBA image with transparency and save it as PNG
-#[allow(dead_code)]
 fn create_and_save_test_rgba_image(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut image: RgbaImage = ImageBuffer::new(width, height);
 
@@ -87,7 +85,7 @@ fn create_and_save_test_rgba_image(filename: &str, width: u32, height: u32) -> P
                 (100, 100, 100, 0)
             };
 
-            image.put_pixel(x, y, Rgba([r, g, b, a]));
+            image.put_pixel(x, y, Rgba((r, g, b, a).into()));
         }
     }
 
@@ -98,7 +96,6 @@ fn create_and_save_test_rgba_image(filename: &str, width: u32, height: u32) -> P
 }
 
 /// Create a test alpha mask and save it as grayscale PNG
-#[allow(dead_code)]
 fn create_and_save_test_alpha_mask(filename: &str, width: u32, height: u32) -> PathBuf {
     let mut mask: GrayImage = ImageBuffer::new(width, height);
 
@@ -129,7 +126,6 @@ fn create_and_save_test_alpha_mask(filename: &str, width: u32, height: u32) -> P
     path
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn rgb_image_loading_and_processing_works() {
     // Create test image
@@ -160,7 +156,6 @@ fn rgb_image_loading_and_processing_works() {
     assert_eq!(*padding_pixel, Rgb([255, 255, 255]));
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn rgba_image_loading_and_processing_works() {
     // Create test RGBA image
@@ -176,7 +171,7 @@ fn rgba_image_loading_and_processing_works() {
 
     // Test alpha premultiplication
     let rgb_result = image
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(rgb_result.dimensions(), (80, 80));
@@ -190,7 +185,6 @@ fn rgba_image_loading_and_processing_works() {
     assert!(edge_pixel[0] < 50 && edge_pixel[1] < 50 && edge_pixel[2] < 50);
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn alpha_mask_with_real_images_works() {
     // Create test images
@@ -220,7 +214,6 @@ fn alpha_mask_with_real_images_works() {
     assert_eq!(corner_pixel[3], 0); // No alpha
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn foreground_estimation_with_real_images_works() {
     // Create test images with smaller size for foreground estimation
@@ -236,7 +229,7 @@ fn foreground_estimation_with_real_images_works() {
 
     // Estimate foreground
     let foreground = rgb_image
-        .estimate_foreground(&mask_image, 10) // Small radius for test
+        .estimate_foreground_colors(&mask_image, 11) // Small radius for test
         .expect("Foreground estimation should succeed");
 
     assert_eq!(foreground.dimensions(), (40, 40));
@@ -246,7 +239,6 @@ fn foreground_estimation_with_real_images_works() {
     assert!(center_pixel[0] > 0 || center_pixel[1] > 0 || center_pixel[2] > 0);
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn test_complete_workflow_with_real_images() {
     // Create test images
@@ -262,7 +254,7 @@ fn test_complete_workflow_with_real_images() {
 
     // Complete workflow: Foreground estimation → Alpha mask → Premultiplication → Square padding
     let foreground = rgb_image
-        .estimate_foreground(&mask_image, 8)
+        .estimate_foreground_colors(&mask_image, 9)
         .expect("Foreground estimation should succeed");
 
     let with_alpha = foreground
@@ -270,11 +262,11 @@ fn test_complete_workflow_with_real_images() {
         .expect("Alpha mask application should succeed");
 
     let premultiplied = with_alpha
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     let (final_result, position) = premultiplied
-        .add_padding_square(Rgb([128, 128, 128]))
+        .to_square(Rgb([128, 128, 128]))
         .expect("Square padding should succeed");
 
     // Verify final result
@@ -290,7 +282,6 @@ fn test_complete_workflow_with_real_images() {
     assert_eq!(*padding_pixel, Rgb([128, 128, 128]));
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn test_large_real_image_processing() {
     // Test with a larger image to verify performance and memory handling
@@ -313,7 +304,7 @@ fn test_large_real_image_processing() {
 
     // Test padding to even larger size
     let (padded, _) = result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Large image premultiplication should succeed")
         .add_padding((250, 200), Position::Center, Rgb([64, 64, 64]))
         .expect("Large image padding should succeed");
@@ -321,7 +312,6 @@ fn test_large_real_image_processing() {
     assert_eq!(padded.dimensions(), (250, 200));
 }
 
-#[cfg(feature = "test")]
 #[test]
 fn test_edge_case_real_images() {
     // Test with very small real images
@@ -344,7 +334,7 @@ fn test_edge_case_real_images() {
 
     // Test padding tiny image
     let (padded, position) = result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Tiny image premultiplication should succeed")
         .add_padding((10, 10), Position::Center, Rgb([255, 0, 0]))
         .expect("Tiny image padding should succeed");

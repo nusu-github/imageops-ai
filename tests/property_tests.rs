@@ -5,7 +5,8 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
+    ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingExt, Position,
+    PremultiplyAlphaAndDropExt,
 };
 use proptest::prelude::*;
 
@@ -14,20 +15,15 @@ fn image_dimensions() -> impl Strategy<Value = (u32, u32)> {
     (1u32..=20, 1u32..=20)
 }
 
-/// Strategy for generating larger image dimensions for less expensive tests
-#[allow(dead_code)]
-fn larger_image_dimensions() -> impl Strategy<Value = (u32, u32)> {
-    (10u32..=50, 10u32..=50)
-}
-
 /// Strategy for generating RGB pixel values
 fn rgb_pixel() -> impl Strategy<Value = Rgb<u8>> {
-    (any::<u8>(), any::<u8>(), any::<u8>()).prop_map(|(r, g, b)| Rgb([r, g, b]))
+    (any::<u8>(), any::<u8>(), any::<u8>()).prop_map(|(r, g, b)| Rgb((r, g, b).into()))
 }
 
 /// Strategy for generating RGBA pixel values
 fn rgba_pixel() -> impl Strategy<Value = Rgba<u8>> {
-    (any::<u8>(), any::<u8>(), any::<u8>(), any::<u8>()).prop_map(|(r, g, b, a)| Rgba([r, g, b, a]))
+    (any::<u8>(), any::<u8>(), any::<u8>(), any::<u8>())
+        .prop_map(|(r, g, b, a)| Rgba((r, g, b, a).into()))
 }
 
 /// Strategy for generating alpha mask values
@@ -65,22 +61,6 @@ fn create_test_rgb_image_with_pattern(
     image
 }
 
-/// Create a test RGBA image with given dimensions and fill pattern
-#[allow(dead_code)]
-fn create_test_rgba_image_with_pattern(
-    width: u32,
-    height: u32,
-    pattern: impl Fn(u32, u32) -> Rgba<u8>,
-) -> Image<Rgba<u8>> {
-    let mut image: Image<Rgba<u8>> = Image::new(width, height);
-    for y in 0..height {
-        for x in 0..width {
-            image.put_pixel(x, y, pattern(x, y));
-        }
-    }
-    image
-}
-
 /// Create a test alpha mask with given dimensions and fill pattern
 fn create_test_alpha_mask_with_pattern(
     width: u32,
@@ -110,7 +90,7 @@ proptest! {
             }
         }
 
-        let result = image.premultiply_alpha().unwrap();
+        let result = image.premultiply_alpha_and_drop().unwrap();
         prop_assert_eq!(result.dimensions(), (width, height));
     }
 
@@ -129,7 +109,7 @@ proptest! {
             }
         }
 
-        let result = image.premultiply_alpha().unwrap();
+        let result = image.premultiply_alpha_and_drop().unwrap();
 
         // With full opacity, RGB values should be preserved
         for y in 0..height {
@@ -157,7 +137,7 @@ proptest! {
             }
         }
 
-        let result = image.premultiply_alpha().unwrap();
+        let result = image.premultiply_alpha_and_drop().unwrap();
 
         // With zero opacity, all RGB values should be 0 (black)
         for y in 0..height {
@@ -257,7 +237,8 @@ proptest! {
     ) {
         let image = create_test_rgb_image_with_pattern(width, height, |_, _| Rgb([100, 100, 100]));
 
-        let result = image.add_padding_square(fill_color).unwrap();
+        let size = width.max(height);
+        let result = image.add_padding((size, size), Position::Center, fill_color).unwrap();
         let (padded, _) = result;
         let (final_width, final_height) = padded.dimensions();
 
@@ -273,17 +254,35 @@ proptest! {
         (width, height) in (5u32..=15, 5u32..=15), // Larger minimum for blur operations
         rgb_pixel in rgb_pixel(),
         alpha_pixel in alpha_pixel(),
-        radius in 1u32..=2 // Box filter requires 2*radius+1 <= min(width, height)
+        radius in 1u32..=3 // Box filter requires odd radius and 2*radius+1 <= min(width, height)
     ) {
         let image = create_test_rgb_image_with_pattern(width, height, |_, _| rgb_pixel);
         let mask = create_test_alpha_mask_with_pattern(width, height, |_, _| alpha_pixel);
 
         // Ensure radius is valid for the image size
+        // The blur_fusion module requires odd radius values
         let min_dimension = width.min(height);
-        let max_radius = (min_dimension - 1) / 2;
-        let valid_radius = radius.min(max_radius).max(1);
 
-        let result = image.estimate_foreground(&mask, valid_radius);
+        // Skip test if image is too small for any blur operation
+        if min_dimension < 5 {
+            return Ok(());
+        }
+
+        // Ensure radius is odd
+        let odd_radius = if radius % 2 == 0 { radius + 1 } else { radius };
+
+        // Be conservative with radius to ensure it fits within image bounds
+        let max_radius = (min_dimension - 1) / 2;
+        let valid_radius = odd_radius.min(max_radius);
+
+        // Ensure final radius is odd
+        let valid_radius = if valid_radius % 2 == 0 {
+            valid_radius.saturating_sub(1).max(1)
+        } else {
+            valid_radius
+        };
+
+        let result = image.estimate_foreground_colors(&mask, valid_radius);
         prop_assert!(result.is_ok());
 
         if let Ok(foreground) = result {
@@ -327,7 +326,7 @@ proptest! {
         prop_assert!(with_alpha.is_ok());
 
         if let Ok(rgba_image) = with_alpha {
-            let premultiplied = rgba_image.premultiply_alpha();
+            let premultiplied = rgba_image.premultiply_alpha_and_drop();
             prop_assert!(premultiplied.is_ok());
 
             if let Ok(final_image) = premultiplied {

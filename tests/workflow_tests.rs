@@ -5,7 +5,8 @@
 
 use image::{Luma, Rgb, Rgba};
 use imageops_ai::{
-    AlphaPremultiplyExt, ApplyAlphaMaskExt, ForegroundEstimator, Image, Padding, Position,
+    ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingExt, Position,
+    PremultiplyAlphaAndDropExt,
 };
 
 /// Test helper to create a test RGB image with known pattern
@@ -102,7 +103,7 @@ fn rgba_premultiply_workflow_works() {
 
     // Apply alpha premultiplication
     let rgb_result = rgba_image
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(rgb_result.dimensions(), (5, 5));
@@ -122,14 +123,16 @@ fn rgb_foreground_estimation_with_padding_works() {
 
     // Step 1: Estimate foreground using Blur-Fusion
     let foreground = image
-        .estimate_foreground(&alpha_mask, 3) // Small radius for small test image
+        .estimate_foreground_colors(&alpha_mask, 3) // Small radius for small test image
         .expect("Foreground estimation should succeed");
 
     assert_eq!(foreground.dimensions(), (10, 10));
 
     // Step 2: Apply square padding to foreground
+    let (width, height) = foreground.dimensions();
+    let size = width.max(height);
     let (padded_foreground, position) = foreground
-        .add_padding_square(Rgb([0, 0, 0]))
+        .add_padding((size, size), Position::Center, Rgb([0, 0, 0]))
         .expect("Square padding should succeed");
 
     // Since image is square (10x10), no padding should be needed
@@ -144,8 +147,10 @@ fn rgb_foreground_estimation_with_padding_works() {
         }
     }
 
+    let (width, height) = rect_image.dimensions();
+    let size = width.max(height);
     let (square_padded, pos) = rect_image
-        .add_padding_square(Rgb([255, 255, 255]))
+        .add_padding((size, size), Position::Center, Rgb([255, 255, 255]))
         .expect("Square padding of rectangular image should succeed");
 
     assert_eq!(square_padded.dimensions(), (8, 8)); // Should become square
@@ -177,7 +182,7 @@ fn complex_workflow_all_operations_work() {
 
     // Step 1: Estimate foreground
     let foreground = original_image
-        .estimate_foreground(&alpha_mask, 3)
+        .estimate_foreground_colors(&alpha_mask, 3)
         .expect("Foreground estimation should succeed");
 
     // Step 2: Add padding to foreground
@@ -202,7 +207,7 @@ fn complex_workflow_all_operations_work() {
 
     // Step 5: Convert back to RGB with premultiplication
     let final_result = rgba_result
-        .premultiply_alpha()
+        .premultiply_alpha_and_drop()
         .expect("Alpha premultiplication should succeed");
 
     assert_eq!(final_result.dimensions(), (15, 15));

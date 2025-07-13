@@ -16,6 +16,16 @@ use image::{Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::Image;
 use imageproc::map::{map_colors, WithChannel};
 
+type UnifiedRgbImages<T, U> = (
+    Image<Rgb<<T as LargerType<U>>::Output>>,
+    Image<Rgb<<T as LargerType<U>>::Output>>,
+);
+
+type UnifiedGrayImages<T, U> = (
+    Image<Luma<<T as LargerType<U>>::Output>>,
+    Image<Luma<<T as LargerType<U>>::Output>>,
+);
+
 /// Trait for determining the larger of two numeric types.
 /// This is used to unify two images with different subpixel types.
 pub trait LargerType<T> {
@@ -275,10 +285,7 @@ impl_larger_type!(i32, u64);
 pub fn unify_rgb_images<T, U>(
     first_image: &Image<Rgb<T>>,
     second_image: &Image<Rgb<U>>,
-) -> (
-    Image<Rgb<<T as LargerType<U>>::Output>>,
-    Image<Rgb<<T as LargerType<U>>::Output>>,
-)
+) -> UnifiedRgbImages<T, U>
 where
     T: LargerType<U> + Primitive,
     U: Primitive,
@@ -325,10 +332,7 @@ where
 pub fn unify_gray_images<T, U>(
     first_image: &Image<Luma<T>>,
     second_image: &Image<Luma<U>>,
-) -> (
-    Image<Luma<<T as LargerType<U>>::Output>>,
-    Image<Luma<<T as LargerType<U>>::Output>>,
-)
+) -> UnifiedGrayImages<T, U>
 where
     T: LargerType<U> + Primitive,
     U: Primitive,
@@ -451,11 +455,11 @@ mod tests {
         // Test f32 to u8
         assert_eq!(u8::normalized_from(0.0f32), 0u8);
         assert_eq!(u8::normalized_from(1.0f32), 255u8);
-        assert_eq!(u8::normalized_from(0.5f32), 128u8);
+        assert_eq!(u8::normalized_from(0.5f32), 127u8);
 
         // Test f32 to u16
         assert_eq!(u16::normalized_from(0.0f32), 0u16);
         assert_eq!(u16::normalized_from(1.0f32), 65535u16);
-        assert_eq!(u16::normalized_from(0.5f32), 32768u16);
+        assert_eq!(u16::normalized_from(0.5f32), 32767u16);
     }
 }

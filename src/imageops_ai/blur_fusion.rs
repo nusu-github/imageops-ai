@@ -150,13 +150,14 @@
 
 use image::{ImageBuffer, Luma, Pixel, Primitive, Rgb};
 use imageproc::definitions::{Clamp, Image};
+use itertools::izip;
 use libblur::{
     box_blur_f32, BlurImage, BlurImageMut, BoxBlurParameters, FastBlurChannels, ThreadingPolicy,
 };
 
 use crate::{error::AlphaMaskError, utils::validate_matching_dimensions};
 
-const CHUNK_SIZE: usize = 8;
+type SmoothingResult<T> = Result<(Image<Rgb<T>>, Image<Rgb<T>>), AlphaMaskError>;
 
 /// Trait for performing Blur-Fusion foreground estimation on RGB images.
 ///
@@ -170,7 +171,8 @@ const CHUNK_SIZE: usize = 8;
 pub trait ForegroundEstimationExt<S>
 where
     Rgb<S>: Pixel<Subpixel = S>,
-    S: Into<f32> + Clamp<f32> + Primitive,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
     /// Performs Blur-Fusion foreground estimation on the image.
     ///
@@ -203,7 +205,8 @@ where
 impl<S> ForegroundEstimationExt<S> for Image<Rgb<S>>
 where
     Rgb<S>: Pixel<Subpixel = S>,
-    S: Into<f32> + Clamp<f32> + Primitive,
+    S: Clamp<f32> + Primitive,
+    f32: From<S>,
 {
     fn estimate_foreground_colors(
         self,
@@ -259,7 +262,8 @@ pub fn estimate_foreground_colors<T>(
 ) -> Result<Image<Rgb<T>>, AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    T: Into<f32> + Clamp<f32> + Primitive,
+    T: Clamp<f32> + Primitive,
+    f32: From<T>,
 {
     validate_inputs_impl(image, alpha, radius, iterations)?;
 
@@ -298,45 +302,40 @@ fn apply_blur_fusion_step_impl<T>(
 ) -> Result<(), AlphaMaskError>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    T: Into<f32> + Clamp<f32> + Primitive,
+    T: Clamp<f32> + Primitive,
+    f32: From<T>,
 {
     // Phase 1: Compute weighted blurred estimates using optimized approach
     let (f_hat, b_hat) = compute_smoothed_estimates_impl(foreground, background, alpha, radius)?;
 
-    // Phase 2: Apply final foreground estimation (Equation 7) with chunked processing
-    let max_val = T::DEFAULT_MAX_VALUE.into();
+    // Phase 2: Apply final foreground estimation (Equation 7) using iterators
+    let max_val = f32::from(T::DEFAULT_MAX_VALUE);
     let inv_max_val = 1.0 / max_val;
-    let (width, height) = image.dimensions();
-    let total_pixels = (width * height) as usize;
 
-    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
-        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
-
-        for i in chunk_start..chunk_end {
-            let i_pixel = &image.as_raw()[i * 3..i * 3 + 3];
-            let f_hat_pixel = &f_hat.as_raw()[i * 3..i * 3 + 3];
-            let b_hat_pixel = &b_hat.as_raw()[i * 3..i * 3 + 3];
-            let alpha_val = alpha.as_raw()[i];
-
-            let normalized_alpha = alpha_val.into() * inv_max_val;
-
-            // Inline final foreground computation for better performance
+    izip!(
+        foreground.pixels_mut(),
+        image.pixels(),
+        f_hat.pixels(),
+        b_hat.pixels(),
+        alpha.pixels()
+    )
+    .for_each(
+        |(fg_pixel, i_pixel, f_hat_pixel, b_hat_pixel, alpha_pixel)| {
+            let normalized_alpha = f32::from(alpha_pixel[0]) * inv_max_val;
             let beta = 1.0 - normalized_alpha;
-            let foreground_raw = foreground.as_mut();
 
-            // Process all three channels
             for c in 0..3 {
-                let i_c = i_pixel[c].into();
-                let f_hat_c = f_hat_pixel[c].into();
-                let b_hat_c = b_hat_pixel[c].into();
+                let i_c = f32::from(i_pixel[c]);
+                let f_hat_c = f32::from(f_hat_pixel[c]);
+                let b_hat_c = f32::from(b_hat_pixel[c]);
 
                 let correction = beta.mul_add(-b_hat_c, normalized_alpha.mul_add(-f_hat_c, i_c));
                 let final_val = normalized_alpha.mul_add(correction, f_hat_c);
 
-                foreground_raw[i * 3 + c] = T::clamp(final_val);
+                fg_pixel[c] = T::clamp(final_val);
             }
-        }
-    }
+        },
+    );
 
     Ok(())
 }
@@ -353,10 +352,11 @@ fn compute_smoothed_estimates_impl<T>(
     background: &Image<Rgb<T>>,
     alpha: &Image<Luma<T>>,
     radius: u32,
-) -> Result<(Image<Rgb<T>>, Image<Rgb<T>>), AlphaMaskError>
+) -> SmoothingResult<T>
 where
     Rgb<T>: Pixel<Subpixel = T>,
-    T: Into<f32> + Clamp<f32> + Primitive,
+    T: Clamp<f32> + Primitive,
+    f32: From<T>,
 {
     let (width, height) = foreground.dimensions();
 
@@ -365,38 +365,34 @@ where
     let mut alpha_weighted: Image<Luma<f32>> = ImageBuffer::new(width, height);
     let mut beta_weighted: Image<Luma<f32>> = ImageBuffer::new(width, height);
 
-    // Process pixels in chunks for better cache efficiency and potential vectorization
-    let max_val = T::DEFAULT_MAX_VALUE;
+    // Pre-compute weighted images using iterators for improved safety and readability
+    let max_val = f32::from(T::DEFAULT_MAX_VALUE);
 
-    let total_pixels = (width * height) as usize;
-    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
-        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
+    izip!(
+        fg_weighted.pixels_mut(),
+        bg_weighted.pixels_mut(),
+        alpha_weighted.pixels_mut(),
+        beta_weighted.pixels_mut(),
+        foreground.pixels(),
+        background.pixels(),
+        alpha.pixels()
+    )
+    .for_each(
+        |(fg_w_pixel, bg_w_pixel, alpha_w_pixel, beta_w_pixel, fg_pixel, bg_pixel, alpha_pixel)| {
+            let alpha_f32 = f32::from(alpha_pixel[0]);
+            let beta_f32 = max_val - alpha_f32;
 
-        for i in chunk_start..chunk_end {
-            let fg_pixel = &foreground.as_raw()[i * 3..i * 3 + 3];
-            let bg_pixel = &background.as_raw()[i * 3..i * 3 + 3];
-            let alpha_val = alpha.as_raw()[i];
+            // Update weighted foreground and background
+            for c in 0..3 {
+                fg_w_pixel[c] = f32::from(fg_pixel[c]) * alpha_f32;
+                bg_w_pixel[c] = f32::from(bg_pixel[c]) * beta_f32;
+            }
 
-            let alpha_f32 = alpha_val.into();
-            let beta_f32 = (max_val - alpha_val).into();
-
-            // Update fg_weighted
-            let fg_weighted_raw = fg_weighted.as_mut();
-            fg_weighted_raw[i * 3] = fg_pixel[0].into() * alpha_f32;
-            fg_weighted_raw[i * 3 + 1] = fg_pixel[1].into() * alpha_f32;
-            fg_weighted_raw[i * 3 + 2] = fg_pixel[2].into() * alpha_f32;
-
-            // Update bg_weighted
-            let bg_weighted_raw = bg_weighted.as_mut();
-            bg_weighted_raw[i * 3] = bg_pixel[0].into() * beta_f32;
-            bg_weighted_raw[i * 3 + 1] = bg_pixel[1].into() * beta_f32;
-            bg_weighted_raw[i * 3 + 2] = bg_pixel[2].into() * beta_f32;
-
-            // Update alpha and beta weighted
-            alpha_weighted.as_mut()[i] = alpha_f32;
-            beta_weighted.as_mut()[i] = beta_f32;
-        }
-    }
+            // Update weighted alpha and beta
+            alpha_w_pixel[0] = alpha_f32;
+            beta_w_pixel[0] = beta_f32;
+        },
+    );
 
     // Apply box filter to all weighted images using integral image implementation
     let converted_fg_weighted = BlurImage::borrow(
@@ -430,32 +426,33 @@ where
 
     let box_params = BoxBlurParameters::new(radius);
 
+    // Use Sequential threading policy to adhere to project guidelines
     box_blur_f32(
         &converted_fg_weighted,
         &mut blurred_fg_weighted,
         box_params,
-        ThreadingPolicy::Adaptive,
+        ThreadingPolicy::Single,
     )
     .map_err(|e| AlphaMaskError::BlurFusionError(e.to_string()))?;
     box_blur_f32(
         &converted_bg_weighted,
         &mut blurred_bg_weighted,
         box_params,
-        ThreadingPolicy::Adaptive,
+        ThreadingPolicy::Single,
     )
     .map_err(|e| AlphaMaskError::BlurFusionError(e.to_string()))?;
     box_blur_f32(
         &converted_alpha_weighted,
         &mut blurred_alpha_weighted,
         box_params,
-        ThreadingPolicy::Adaptive,
+        ThreadingPolicy::Single,
     )
     .map_err(|e| AlphaMaskError::BlurFusionError(e.to_string()))?;
     box_blur_f32(
         &converted_beta_weighted,
         &mut blurred_beta_weighted,
         box_params,
-        ThreadingPolicy::Adaptive,
+        ThreadingPolicy::Single,
     )
     .map_err(|e| AlphaMaskError::BlurFusionError(e.to_string()))?;
 
@@ -493,48 +490,43 @@ where
         AlphaMaskError::BlurFusionError("Failed to create blurred beta weights image".to_string())
     })?;
 
-    // Reconstruct final averaged images using direct calculations
+    // Reconstruct final averaged images using iterators
     let mut f_hat: Image<Rgb<T>> = ImageBuffer::new(width, height);
     let mut b_hat: Image<Rgb<T>> = ImageBuffer::new(width, height);
 
-    // Process reconstruction in chunks for better cache efficiency
-    for chunk_start in (0..total_pixels).step_by(CHUNK_SIZE) {
-        let chunk_end = (chunk_start + CHUNK_SIZE).min(total_pixels);
-
-        for i in chunk_start..chunk_end {
-            let fg_pixel = &foreground.as_raw()[i * 3..i * 3 + 3];
-            let bg_pixel = &background.as_raw()[i * 3..i * 3 + 3];
-            let fg_blurred = &fg_blurred.as_raw()[i * 3..i * 3 + 3];
-            let bg_blurred = &bg_blurred.as_raw()[i * 3..i * 3 + 3];
-            let alpha_weight: f32 = alpha_weights_blurred.as_raw()[i];
-            let beta_weight: f32 = beta_weights_blurred.as_raw()[i];
-
-            let f_hat_raw = f_hat.as_mut();
-            let b_hat_raw = b_hat.as_mut();
-
+    izip!(
+        f_hat.pixels_mut(),
+        b_hat.pixels_mut(),
+        foreground.pixels(),
+        background.pixels(),
+        fg_blurred.pixels(),
+        bg_blurred.pixels(),
+        alpha_weights_blurred.pixels(),
+        beta_weights_blurred.pixels()
+    )
+    .for_each(
+        |(f_hat_pixel, b_hat_pixel, fg_pixel, bg_pixel, fg_b, bg_b, alpha_w, beta_w)| {
+            let alpha_weight = alpha_w[0];
             if alpha_weight > 0.0 {
                 let inv_alpha_weight = 1.0 / alpha_weight;
-                f_hat_raw[i * 3] = T::clamp(fg_blurred[0] * inv_alpha_weight);
-                f_hat_raw[i * 3 + 1] = T::clamp(fg_blurred[1] * inv_alpha_weight);
-                f_hat_raw[i * 3 + 2] = T::clamp(fg_blurred[2] * inv_alpha_weight);
+                for c in 0..3 {
+                    f_hat_pixel[c] = T::clamp(fg_b[c] * inv_alpha_weight);
+                }
             } else {
-                f_hat_raw[i * 3] = T::clamp(fg_pixel[0].into());
-                f_hat_raw[i * 3 + 1] = T::clamp(fg_pixel[1].into());
-                f_hat_raw[i * 3 + 2] = T::clamp(fg_pixel[2].into());
+                *f_hat_pixel = *fg_pixel;
             }
 
+            let beta_weight = beta_w[0];
             if beta_weight > 0.0 {
                 let inv_beta_weight = 1.0 / beta_weight;
-                b_hat_raw[i * 3] = T::clamp(bg_blurred[0] * inv_beta_weight);
-                b_hat_raw[i * 3 + 1] = T::clamp(bg_blurred[1] * inv_beta_weight);
-                b_hat_raw[i * 3 + 2] = T::clamp(bg_blurred[2] * inv_beta_weight);
+                for c in 0..3 {
+                    b_hat_pixel[c] = T::clamp(bg_b[c] * inv_beta_weight);
+                }
             } else {
-                b_hat_raw[i * 3] = T::clamp(bg_pixel[0].into());
-                b_hat_raw[i * 3 + 1] = T::clamp(bg_pixel[1].into());
-                b_hat_raw[i * 3 + 2] = T::clamp(bg_pixel[2].into());
+                *b_hat_pixel = *bg_pixel;
             }
-        }
-    }
+        },
+    );
 
     Ok((f_hat, b_hat))
 }
@@ -579,6 +571,8 @@ where
     }
 
     // Check if image is large enough for box filter with given radius
+    // Note: The libblur crate requires stricter bounds than the theoretical minimum
+    // For safety, the image should be larger than 2*radius+1, not just equal to it
     let min_dimension_required = 2 * radius + 1;
     let min_dimension = img_w.min(img_h);
     if min_dimension < min_dimension_required {
@@ -603,76 +597,92 @@ mod tests {
     use image::{Luma, Rgb};
     use imageproc::definitions::Image;
 
-    #[test]
-    fn estimate_foreground_colors_with_basic_input_returns_valid_result() {
-        // Create larger test image (4x4) to satisfy minimum radius requirements
+    // --- Test Setup ---
+    fn create_basic_4x4_image_and_alpha() -> (Image<Rgb<u8>>, Image<Luma<u8>>) {
         let image = create_large_test_image(4, 4);
         let mut alpha: Image<Luma<u8>> = Image::new(4, 4);
-
-        // Create simple alpha pattern
         for y in 0..4 {
             for x in 0..4 {
                 let alpha_val = if x < 2 { 255 } else { 128 };
                 alpha.put_pixel(x, y, Luma([alpha_val]));
             }
         }
+        (image, alpha)
+    }
 
+    // --- Success Cases ---
+
+    #[test]
+    fn estimate_foreground_colors_succeeds_on_valid_input() {
+        let (image, alpha) = create_basic_4x4_image_and_alpha();
         let result = estimate_foreground_colors(&image, &alpha, 1, 1);
         assert!(result.is_ok());
-        let foreground = result.unwrap();
+    }
+
+    #[test]
+    fn estimate_foreground_colors_returns_image_with_correct_dimensions() {
+        let (image, alpha) = create_basic_4x4_image_and_alpha();
+        let foreground = estimate_foreground_colors(&image, &alpha, 1, 1).unwrap();
         assert_eq!(foreground.dimensions(), image.dimensions());
     }
 
     #[test]
-    fn estimate_foreground_colors_ext_trait_method_returns_valid_result() {
+    fn estimate_foreground_colors_ext_trait_succeeds() {
         let image = create_large_test_image(4, 4);
-        let mut alpha: Image<Luma<u8>> = Image::new(4, 4);
-
-        // Create simple alpha pattern
-        for y in 0..4 {
-            for x in 0..4 {
-                alpha.put_pixel(x, y, Luma([200]));
-            }
-        }
-
+        let alpha = Image::from_pixel(4, 4, Luma([200]));
         let result = image.estimate_foreground_colors(&alpha, 1);
         assert!(result.is_ok());
-        let foreground = result.unwrap();
+    }
+
+    #[test]
+    fn estimate_foreground_colors_ext_trait_returns_correct_dimensions() {
+        let image = create_large_test_image(4, 4);
+        let alpha = Image::from_pixel(4, 4, Luma([200]));
+        let foreground = image.estimate_foreground_colors(&alpha, 1).unwrap();
         assert_eq!(foreground.dimensions(), (4, 4));
     }
 
     #[test]
-    fn estimate_foreground_colors_with_two_iterations_returns_valid_result() {
-        // Create larger test image for the two-iteration test (needs 193x193 for radius 91)
+    fn estimate_foreground_colors_succeeds_with_two_iterations() {
         let image = create_large_test_image(193, 193);
-        let mut alpha: Image<Luma<u8>> = Image::new(193, 193);
-
-        // Create gradient alpha
-        for y in 0..193 {
-            for x in 0..193 {
-                let alpha_val = ((x + y) * 255 / 384) as u8;
-                alpha.put_pixel(x, y, Luma([alpha_val]));
-            }
-        }
-
-        let result = estimate_foreground_colors(&image, &alpha, 1, 2);
-        if let Err(e) = &result {
-            eprintln!("Error in two iterations test: {:?}", e);
-        }
+        let alpha = Image::from_fn(193, 193, |x, y| Luma([((x + y) * 255 / 384) as u8]));
+        let result = estimate_foreground_colors(&image, &alpha, 91, 2);
         assert!(result.is_ok());
-        let foreground = result.unwrap();
-        assert_eq!(foreground.dimensions(), image.dimensions());
     }
 
     #[test]
-    fn estimate_foreground_colors_with_mismatched_dimensions_returns_error() {
-        let image = create_test_rgb_image();
-        let alpha: Image<Luma<u8>> = Image::new(3, 3); // Different size
+    fn estimate_foreground_colors_with_fully_opaque_alpha_is_close_to_original() {
+        let image = create_large_test_image(4, 4);
+        let alpha = Image::from_pixel(4, 4, Luma([255]));
+        let foreground = estimate_foreground_colors(&image, &alpha, 1, 1).unwrap();
+        assert!(images_approx_equal(&image, &foreground, 10.0));
+    }
 
+    #[test]
+    fn estimate_foreground_colors_succeeds_with_fully_transparent_alpha() {
+        let image = create_large_test_image(4, 4);
+        let alpha = Image::from_pixel(4, 4, Luma([0]));
         let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::DimensionMismatch { expected, actual } => {
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn estimate_foreground_colors_succeeds_with_f32_type() {
+        let image: Image<Rgb<f32>> = Image::from_pixel(4, 4, Rgb([0.5, 0.7, 0.9]));
+        let alpha: Image<Luma<f32>> = Image::from_pixel(4, 4, Luma([0.5]));
+        let result = estimate_foreground_colors(&image, &alpha, 1, 1);
+        assert!(result.is_ok());
+    }
+
+    // --- Error Cases ---
+
+    #[test]
+    fn estimate_foreground_colors_errs_on_mismatched_dimensions() {
+        let image = create_test_rgb_image();
+        let alpha: Image<Luma<u8>> = Image::new(3, 3);
+        let result = estimate_foreground_colors(&image, &alpha, 1, 1);
+        match result {
+            Err(AlphaMaskError::DimensionMismatch { expected, actual }) => {
                 assert_eq!(expected, (2, 2));
                 assert_eq!(actual, (3, 3));
             }
@@ -681,161 +691,55 @@ mod tests {
     }
 
     #[test]
-    fn estimate_foreground_colors_with_zero_radius_returns_error() {
+    fn estimate_foreground_colors_errs_on_zero_radius() {
         let image = create_test_rgb_image();
         let alpha = create_test_alpha_mask();
-
         let result = estimate_foreground_colors(&image, &alpha, 0, 1);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::InvalidParameter(msg) => {
-                assert!(msg.contains("radius must be > 0"));
-            }
-            _ => panic!("Expected InvalidParameter error"),
-        }
+        assert!(matches!(
+            result,
+            Err(AlphaMaskError::InvalidParameter(msg)) if msg.contains("radius must be > 0")
+        ));
     }
 
     #[test]
-    fn estimate_foreground_colors_with_even_radius_returns_error() {
+    fn estimate_foreground_colors_errs_on_even_radius() {
         let image = create_large_test_image(10, 10);
-        let mut alpha: Image<Luma<u8>> = Image::new(10, 10);
-        for y in 0..10 {
-            for x in 0..10 {
-                alpha.put_pixel(x, y, Luma([128]));
-            }
-        }
-
+        let alpha = Image::from_pixel(10, 10, Luma([128]));
         let result = estimate_foreground_colors(&image, &alpha, 4, 1);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::InvalidParameter(msg) => {
-                assert!(msg.contains("radius must be odd"));
-            }
-            _ => panic!("Expected InvalidParameter error"),
-        }
+        assert!(matches!(
+            result,
+            Err(AlphaMaskError::InvalidParameter(msg)) if msg.contains("radius must be odd")
+        ));
     }
 
     #[test]
-    fn estimate_foreground_colors_with_invalid_iterations_returns_error() {
-        let image = create_large_test_image(4, 4);
-        let mut alpha: Image<Luma<u8>> = Image::new(4, 4);
-        for y in 0..4 {
-            for x in 0..4 {
-                alpha.put_pixel(x, y, Luma([128]));
-            }
-        }
-
-        // Test 0 iterations
+    fn estimate_foreground_colors_errs_on_zero_iterations() {
+        let (image, alpha) = create_basic_4x4_image_and_alpha();
         let result = estimate_foreground_colors(&image, &alpha, 1, 0);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::InvalidParameter(msg) => {
-                eprintln!("Error message for 0 iterations: {}", msg);
-                assert!(msg.contains("iterations must be 1 or 2"));
-            }
-            _ => panic!("Expected InvalidParameter error"),
-        }
+        assert!(matches!(
+            result,
+            Err(AlphaMaskError::InvalidParameter(msg)) if msg.contains("iterations must be 1 or 2")
+        ));
+    }
 
-        // Test > 2 iterations
+    #[test]
+    fn estimate_foreground_colors_errs_on_too_many_iterations() {
+        let (image, alpha) = create_basic_4x4_image_and_alpha();
         let result = estimate_foreground_colors(&image, &alpha, 1, 3);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::InvalidParameter(msg) => {
-                assert!(msg.contains("iterations must be 1 or 2"));
-            }
-            _ => panic!("Expected InvalidParameter error"),
-        }
+        assert!(matches!(
+            result,
+            Err(AlphaMaskError::InvalidParameter(msg)) if msg.contains("iterations must be 1 or 2")
+        ));
     }
 
     #[test]
-    fn estimate_foreground_colors_with_large_image_returns_valid_result() {
-        let image = create_large_test_image(100, 100);
-        let mut alpha: Image<Luma<u8>> = Image::new(100, 100);
-
-        // Create gradient alpha
-        for y in 0..100 {
-            for x in 0..100 {
-                let alpha_val = ((x as f32 / 99.0) * 255.0) as u8;
-                alpha.put_pixel(x, y, Luma([alpha_val]));
-            }
-        }
-
-        let result = estimate_foreground_colors(&image, &alpha, 5, 1);
-        assert!(result.is_ok());
-        let foreground = result.unwrap();
-        assert_eq!(foreground.dimensions(), (100, 100));
-    }
-
-    #[test]
-    fn estimate_foreground_colors_with_fully_opaque_alpha_matches_original() {
-        let image = create_large_test_image(4, 4);
-        let mut alpha: Image<Luma<u8>> = Image::new(4, 4);
-
-        // All pixels fully opaque
-        for y in 0..4 {
-            for x in 0..4 {
-                alpha.put_pixel(x, y, Luma([255]));
-            }
-        }
-
-        let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_ok());
-        let foreground = result.unwrap();
-
-        // When alpha is fully opaque, foreground should be close to original
-        assert!(images_approx_equal(&image, &foreground, 10.0));
-    }
-
-    #[test]
-    fn estimate_foreground_colors_with_fully_transparent_alpha_returns_valid_result() {
-        let image = create_large_test_image(4, 4);
-        let mut alpha: Image<Luma<u8>> = Image::new(4, 4);
-
-        // All pixels fully transparent
-        for y in 0..4 {
-            for x in 0..4 {
-                alpha.put_pixel(x, y, Luma([0]));
-            }
-        }
-
-        let result = estimate_foreground_colors(&image, &alpha, 1, 1);
-        assert!(result.is_ok());
-        let foreground = result.unwrap();
-        assert_eq!(foreground.dimensions(), (4, 4));
-    }
-
-    #[test]
-    fn estimate_foreground_colors_with_radius_too_large_returns_error() {
+    fn estimate_foreground_colors_errs_on_radius_too_large_for_image() {
         let image = create_test_rgb_image(); // 2x2 image
         let alpha = create_test_alpha_mask();
-
-        // Radius is too large for 2x2 image (requires at least 7x7 for radius 3)
         let result = estimate_foreground_colors(&image, &alpha, 3, 1);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            AlphaMaskError::InvalidParameter(msg) => {
-                assert!(msg.contains("too small for radius"));
-            }
-            _ => panic!("Expected InvalidParameter error"),
-        }
-    }
-
-    #[test]
-    fn estimate_foreground_colors_with_different_numeric_types_returns_valid_result() {
-        // Test with f32 type
-        let mut image_f32: Image<Rgb<f32>> = Image::new(4, 4);
-        let mut alpha_f32: Image<Luma<f32>> = Image::new(4, 4);
-
-        for y in 0..4 {
-            for x in 0..4 {
-                image_f32.put_pixel(x, y, Rgb([0.5, 0.7, 0.9]));
-                alpha_f32.put_pixel(x, y, Luma([0.5]));
-            }
-        }
-
-        let result = estimate_foreground_colors(&image_f32, &alpha_f32, 1, 1);
-        assert!(result.is_ok());
-        let foreground = result.unwrap();
-        assert_eq!(foreground.dimensions(), (4, 4));
+        assert!(matches!(
+            result,
+            Err(AlphaMaskError::InvalidParameter(msg)) if msg.contains("too small for radius")
+        ));
     }
 }

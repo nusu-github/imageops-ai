@@ -1,5 +1,6 @@
-use image::{GenericImageView, ImageBuffer, Pixel, Primitive};
+use image::{ImageBuffer, Pixel, Primitive};
 use imageproc::definitions::{Clamp, Image};
+use itertools::{iproduct, Itertools};
 
 use crate::error::InterAreaError;
 
@@ -47,60 +48,115 @@ fn compute_interpolation_weights_impl(
     dst_size: u32,
     scale: f32,
 ) -> Vec<InterpolationWeight> {
-    let mut tab = Vec::new();
+    (0..dst_size)
+        .flat_map(|dx| compute_weights_for_destination_pixel(dx, src_size, scale))
+        .collect()
+}
 
-    for dx in 0..dst_size {
-        let src_x_start = dx as f32 * scale;
-        let src_x_end = src_x_start + scale;
+/// Compute interpolation weights for a single destination pixel.
+fn compute_weights_for_destination_pixel(
+    dx: u32,
+    src_size: u32,
+    scale: f32,
+) -> impl Iterator<Item = InterpolationWeight> {
+    let src_x_start = dx as f32 * scale;
+    let src_x_end = src_x_start + scale;
 
-        let src_x_start_int = (src_x_start.ceil() as u32).min(src_size);
-        let src_x_end_int = (src_x_end.floor() as u32).min(src_size);
+    let src_x_start_int = (src_x_start.ceil() as u32).min(src_size);
+    let src_x_end_int = (src_x_end.floor() as u32).min(src_size);
 
-        let cell_width = if src_x_end - src_x_start != scale {
-            // Handle boundary cases where the footprint extends beyond image bounds
-            if src_x_start_int == 0 {
-                src_x_end_int as f32
-            } else if src_x_end_int == src_size {
-                src_size as f32 - src_x_start
-            } else {
-                scale
-            }
-        } else {
-            scale
-        };
+    let cell_width = compute_cell_width(
+        src_x_start,
+        src_x_end,
+        src_x_start_int,
+        src_x_end_int,
+        src_size,
+        scale,
+    );
 
-        // Left partial overlap
-        if src_x_start_int > 0 && (src_x_start_int as f32 - src_x_start) > 1e-3 {
-            let alpha = (src_x_start_int as f32 - src_x_start) / cell_width;
-            tab.push(InterpolationWeight {
-                destination_index: dx,
-                source_index: src_x_start_int - 1,
-                weight: alpha,
-            });
-        }
+    // Create iterators for each type of weight contribution
+    let left_partial = create_left_partial_weight(dx, src_x_start, src_x_start_int, cell_width);
+    let full_overlaps = create_full_overlap_weights(dx, src_x_start_int, src_x_end_int, cell_width);
+    let right_partial =
+        create_right_partial_weight(dx, src_x_end, src_x_end_int, src_size, cell_width);
 
-        // Full overlaps
-        for sx in src_x_start_int..src_x_end_int {
-            let alpha = 1.0 / cell_width;
-            tab.push(InterpolationWeight {
-                destination_index: dx,
-                source_index: sx,
-                weight: alpha,
-            });
-        }
+    left_partial
+        .into_iter()
+        .chain(full_overlaps)
+        .chain(right_partial)
+}
 
-        // Right partial overlap
-        if src_x_end_int < src_size && (src_x_end - src_x_end_int as f32) > 1e-3 {
-            let alpha = (src_x_end - src_x_end_int as f32) / cell_width;
-            tab.push(InterpolationWeight {
-                destination_index: dx,
-                source_index: src_x_end_int,
-                weight: alpha,
-            });
-        }
+/// Compute the effective cell width for interpolation.
+fn compute_cell_width(
+    src_x_start: f32,
+    src_x_end: f32,
+    src_x_start_int: u32,
+    src_x_end_int: u32,
+    src_size: u32,
+    scale: f32,
+) -> f32 {
+    if (src_x_end - src_x_start - scale).abs() < f32::EPSILON {
+        scale
+    } else if src_x_start_int == 0 {
+        src_x_end_int as f32
+    } else if src_x_end_int == src_size {
+        src_size as f32 - src_x_start
+    } else {
+        scale
     }
+}
 
-    tab
+/// Create left partial overlap weight if applicable.
+fn create_left_partial_weight(
+    dx: u32,
+    src_x_start: f32,
+    src_x_start_int: u32,
+    cell_width: f32,
+) -> Option<InterpolationWeight> {
+    let overlap = src_x_start_int as f32 - src_x_start;
+    if src_x_start_int > 0 && overlap > 1e-3 {
+        Some(InterpolationWeight {
+            destination_index: dx,
+            source_index: src_x_start_int - 1,
+            weight: overlap / cell_width,
+        })
+    } else {
+        None
+    }
+}
+
+/// Create full overlap weights using iterators.
+fn create_full_overlap_weights(
+    dx: u32,
+    src_x_start_int: u32,
+    src_x_end_int: u32,
+    cell_width: f32,
+) -> impl Iterator<Item = InterpolationWeight> {
+    (src_x_start_int..src_x_end_int).map(move |sx| InterpolationWeight {
+        destination_index: dx,
+        source_index: sx,
+        weight: 1.0 / cell_width,
+    })
+}
+
+/// Create right partial overlap weight if applicable.
+fn create_right_partial_weight(
+    dx: u32,
+    src_x_end: f32,
+    src_x_end_int: u32,
+    src_size: u32,
+    cell_width: f32,
+) -> Option<InterpolationWeight> {
+    let overlap = src_x_end - src_x_end_int as f32;
+    if src_x_end_int < src_size && overlap > 1e-3 {
+        Some(InterpolationWeight {
+            destination_index: dx,
+            source_index: src_x_end_int,
+            weight: overlap / cell_width,
+        })
+    } else {
+        None
+    }
 }
 
 /// Check if we can use the integer scale optimization.
@@ -117,45 +173,50 @@ fn can_use_integer_scale_impl(src_size: u32, dst_size: u32) -> bool {
 }
 
 /// Integer scale implementation for optimized performance.
-fn resize_area_integer_scale_impl<I, P>(
-    src: &I,
+fn resize_area_integer_scale_impl<P>(
+    src: &Image<P>,
     dst_width: u32,
     dst_height: u32,
 ) -> Result<Image<P>, InterAreaError>
 where
-    I: GenericImageView<Pixel = P>,
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     let (src_width, src_height) = src.dimensions();
     let scale_x = src_width / dst_width;
     let scale_y = src_height / dst_height;
-    let area = (scale_x * scale_y) as f32;
-    let inv_area = 1.0 / area;
+    let inv_area = 1.0 / (scale_x * scale_y) as f32;
+
+    let src_buffer = src.as_raw();
+    let channels = P::CHANNEL_COUNT as usize;
 
     let result = ImageBuffer::from_fn(dst_width, dst_height, |dx, dy| {
-        let mut pixel_sum = vec![0.0f32; P::CHANNEL_COUNT as usize];
-
         let start_x = dx * scale_x;
         let start_y = dy * scale_y;
         let end_x = start_x + scale_x;
         let end_y = start_y + scale_y;
 
-        for sy in start_y..end_y {
-            for sx in start_x..end_x {
-                let pixel = src.get_pixel(sx, sy);
-                let channels = pixel.channels();
+        // Use iproduct to create Cartesian product of coordinates and fold to accumulate
+        let pixel_sum = iproduct!(start_y..end_y, start_x..end_x).fold(
+            vec![0.0f32; channels],
+            |mut acc, (sy, sx)| {
+                let pixel_base_idx = ((sy * src_width + sx) * channels as u32) as usize;
 
-                for c in 0..channels.len() {
-                    pixel_sum[c] += channels[c].into();
+                // Accumulate each channel using iterators
+                for c in 0..channels {
+                    acc[c] += f32::from(src_buffer[pixel_base_idx + c]);
                 }
-            }
-        }
 
-        let mut output_channels = vec![P::Subpixel::DEFAULT_MIN_VALUE; P::CHANNEL_COUNT as usize];
-        for c in 0..pixel_sum.len() {
-            output_channels[c] = P::Subpixel::clamp(pixel_sum[c] * inv_area);
-        }
+                acc
+            },
+        );
+
+        // Convert accumulated values to output pixel using iterator chains
+        let output_channels = pixel_sum
+            .into_iter()
+            .map(|sum| P::Subpixel::clamp(sum * inv_area))
+            .collect_vec();
 
         *P::from_slice(&output_channels)
     });
@@ -164,15 +225,15 @@ where
 }
 
 /// Fractional scale implementation for arbitrary scale factors.
-fn resize_area_fractional_scale_impl<I, P>(
-    src: &I,
+fn resize_area_fractional_scale_impl<P>(
+    src: &Image<P>,
     dst_width: u32,
     dst_height: u32,
 ) -> Result<Image<P>, InterAreaError>
 where
-    I: GenericImageView<Pixel = P>,
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     let (src_width, src_height) = src.dimensions();
     let scale_x = src_width as f32 / dst_width as f32;
@@ -184,85 +245,101 @@ where
 
     let channels = P::CHANNEL_COUNT as usize;
     let mut output = ImageBuffer::new(dst_width, dst_height);
+    let src_buffer = src.as_raw();
 
-    // Intermediate buffers
-    let mut buf = vec![0.0f32; dst_width as usize * channels];
-    let mut sum = vec![0.0f32; dst_width as usize * channels];
+    // Process each destination row by grouping y_weights by destination index
+    for (dy, y_group) in &y_weights.iter().chunk_by(|w| w.destination_index) {
+        let mut row_accumulator = vec![0.0f32; dst_width as usize * channels];
 
-    let mut prev_dy = u32::MAX;
+        // Process each source row that contributes to this destination row
+        for y_entry in y_group {
+            let sy = y_entry.source_index;
+            let beta = y_entry.weight;
 
-    for y_entry in &y_weights {
-        let dy = y_entry.destination_index;
-        let sy = y_entry.source_index;
-        let beta = y_entry.weight;
+            // Horizontal pass: accumulate weighted source pixels
+            let horizontal_result = compute_horizontal_pass(
+                &x_weights, src_buffer, sy, src_width, dst_width, channels, beta,
+            );
 
-        // Clear intermediate buffer
-        buf.fill(0.0);
-
-        // Horizontal pass
-        for x_entry in &x_weights {
-            let dx = x_entry.destination_index;
-            let sx = x_entry.source_index;
-            let alpha = x_entry.weight;
-
-            let src_pixel = src.get_pixel(sx, sy);
-            let src_channels = src_pixel.channels();
-
-            for c in 0..channels {
-                let idx = (dx as usize) * channels + c;
-                buf[idx] += src_channels[c].into() * alpha;
-            }
+            // Add to row accumulator using iterator operations
+            iproduct!(0..dst_width, 0..channels).for_each(|(dx, c)| {
+                let idx = dx as usize * channels + c;
+                row_accumulator[idx] += horizontal_result[idx];
+            });
         }
 
-        // Vertical accumulation
-        for dx in 0..dst_width {
-            for c in 0..channels {
-                let idx = (dx as usize) * channels + c;
-                sum[idx] += buf[idx] * beta;
-            }
-        }
-
-        // Output when destination row changes
-        if dy != prev_dy && prev_dy != u32::MAX {
-            // Write out the accumulated row
-            for dx in 0..dst_width {
-                let mut pixel_channels = vec![P::Subpixel::DEFAULT_MIN_VALUE; channels];
-                for c in 0..channels {
-                    let idx = (dx as usize) * channels + c;
-                    pixel_channels[c] = P::Subpixel::clamp(sum[idx]);
-                }
-                output.put_pixel(dx, prev_dy, *P::from_slice(&pixel_channels));
-            }
-
-            // Clear sum for next row
-            sum.fill(0.0);
-        }
-
-        prev_dy = dy;
-    }
-
-    // Write out the last row
-    if prev_dy != u32::MAX {
-        for dx in 0..dst_width {
-            let mut pixel_channels = vec![P::Subpixel::DEFAULT_MIN_VALUE; channels];
-            for c in 0..channels {
-                let idx = (dx as usize) * channels + c;
-                pixel_channels[c] = P::Subpixel::clamp(sum[idx]);
-            }
-            output.put_pixel(dx, prev_dy, *P::from_slice(&pixel_channels));
-        }
+        // Write the completed row to output
+        write_output_row(&mut output, dy, &row_accumulator, dst_width, channels);
     }
 
     Ok(output)
 }
 
+/// Compute horizontal pass for a single source row.
+fn compute_horizontal_pass<S>(
+    x_weights: &[InterpolationWeight],
+    src_buffer: &[S],
+    sy: u32,
+    src_width: u32,
+    dst_width: u32,
+    channels: usize,
+    beta: f32,
+) -> Vec<f32>
+where
+    S: Primitive,
+    f32: From<S>,
+{
+    let mut horizontal_buf = vec![0.0f32; dst_width as usize * channels];
+
+    for x_entry in x_weights {
+        let dx = x_entry.destination_index;
+        let sx = x_entry.source_index;
+        let alpha = x_entry.weight;
+
+        let src_pixel_base_idx = ((sy * src_width + sx) * channels as u32) as usize;
+        let dst_pixel_base_idx = dx as usize * channels;
+
+        // Accumulate each channel
+        for c in 0..channels {
+            horizontal_buf[dst_pixel_base_idx + c] +=
+                f32::from(src_buffer[src_pixel_base_idx + c]) * alpha * beta;
+        }
+    }
+
+    horizontal_buf
+}
+
+/// Write accumulated row data to output buffer.
+fn write_output_row<P>(
+    output: &mut Image<P>,
+    dy: u32,
+    row_data: &[f32],
+    dst_width: u32,
+    channels: usize,
+) where
+    P: Pixel,
+    P::Subpixel: Clamp<f32>,
+{
+    let output_buffer = output.as_mut();
+
+    for dx in 0..dst_width {
+        let dst_pixel_base_idx = ((dy * dst_width + dx) * channels as u32) as usize;
+        let src_pixel_base_idx = dx as usize * channels;
+
+        for c in 0..channels {
+            output_buffer[dst_pixel_base_idx + c] =
+                P::Subpixel::clamp(row_data[src_pixel_base_idx + c]);
+        }
+    }
+}
+
 impl InterAreaResize {
     /// Resize image using INTER_AREA interpolation.
-    pub fn resize<I, P>(&self, src: &I) -> Result<Image<P>, InterAreaError>
+    pub fn resize<P>(&self, src: &Image<P>) -> Result<Image<P>, InterAreaError>
     where
-        I: GenericImageView<Pixel = P>,
         P: Pixel,
-        P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+        P::Subpixel: Clamp<f32> + Primitive,
+        f32: From<P::Subpixel>,
     {
         let (src_width, src_height) = src.dimensions();
 
@@ -317,7 +394,8 @@ where
 impl<P> InterAreaResizeExt<P> for Image<P>
 where
     P: Pixel,
-    P::Subpixel: Clamp<f32> + Into<f32> + Primitive,
+    P::Subpixel: Clamp<f32> + Primitive,
+    f32: From<P::Subpixel>,
 {
     fn resize_area(self, new_width: u32, new_height: u32) -> Result<Self, InterAreaError> {
         let resizer = InterAreaResize::new(new_width, new_height)?;
@@ -432,5 +510,103 @@ mod tests {
         assert!(pixel[0] > 0 && pixel[0] < 255);
         assert_eq!(pixel[1], 128);
         assert_eq!(pixel[2], 192);
+    }
+
+    // Additional tests for error cases and edge conditions
+
+    #[test]
+    fn inter_area_resize_new_zero_width_returns_error() {
+        let result = InterAreaResize::new(0, 100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn inter_area_resize_new_zero_height_returns_error() {
+        let result = InterAreaResize::new(100, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resize_empty_image_returns_error() {
+        let src: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(0, 100);
+        let resizer = InterAreaResize::new(50, 50).unwrap();
+        let result = resizer.resize(&src);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resize_upscaling_returns_error() {
+        let src = ImageBuffer::from_fn(10, 10, |_, _| Rgb([100u8, 100, 100]));
+        let resizer = InterAreaResize::new(20, 15).unwrap();
+        let result = resizer.resize(&src);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "resize_area_mut is not available")]
+    fn resize_area_mut_implementation_panics() {
+        let mut src = ImageBuffer::from_fn(10, 10, |_, _| Rgb([100u8, 100, 100]));
+        let _ = src.resize_area_mut(5, 5);
+    }
+
+    #[test]
+    fn compute_weights_boundary_case_produces_normalized_weights() {
+        // Test edge case with very small scale
+        let weights = compute_interpolation_weights_impl(100, 1, 100.0);
+        assert!(!weights.is_empty());
+
+        // Sum should be close to 1.0
+        let total_weight: f32 = weights.iter().map(|w| w.weight).sum();
+        assert!((total_weight - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn integer_scale_optimization_large_image_preserves_precision() {
+        // Test with larger image to check for overflow issues
+        let src = ImageBuffer::from_fn(1000, 1000, |x, y| Rgb([((x + y) % 256) as u8, 128, 200]));
+
+        let result = resize_area_integer_scale_impl(&src, 250, 250).unwrap();
+        assert_eq!(result.dimensions(), (250, 250));
+
+        // Verify some pixel values are reasonable
+        let pixel = result.get_pixel(125, 125);
+        assert!(pixel[0] > 0); // Check it's not completely black
+        assert_eq!(pixel[1], 128);
+        assert_eq!(pixel[2], 200);
+    }
+
+    #[test]
+    fn fractional_scale_single_pixel_image_produces_result() {
+        let src = ImageBuffer::from_fn(1, 1, |_, _| Rgb([255u8, 128, 64]));
+        let result = resize_area_fractional_scale_impl(&src, 1, 1).unwrap();
+        assert_eq!(result.dimensions(), (1, 1));
+        assert_eq!(result.get_pixel(0, 0)[0], 255);
+    }
+
+    #[test]
+    fn weight_calculation_precision_consistent_with_epsilon() {
+        // Test that weight calculations handle floating point precision consistently
+        let weights = compute_interpolation_weights_impl(7, 3, 7.0 / 3.0);
+
+        // Verify all weights are positive and reasonable
+        for weight in &weights {
+            assert!(weight.weight > 0.0);
+            assert!(weight.weight <= 1.0);
+        }
+
+        // Check normalization per destination pixel
+        for dst_idx in 0..3 {
+            let sum: f32 = weights
+                .iter()
+                .filter(|w| w.destination_index == dst_idx)
+                .map(|w| w.weight)
+                .sum();
+            assert!(
+                (sum - 1.0).abs() < 1e-5,
+                "Destination {} weight sum: {}",
+                dst_idx,
+                sum
+            );
+        }
     }
 }
