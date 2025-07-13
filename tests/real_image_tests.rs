@@ -4,7 +4,7 @@
 //! works correctly with real-world image data, including file I/O operations.
 
 use image::{GrayImage, ImageBuffer, Luma, Rgb, RgbImage, Rgba, RgbaImage};
-use imageops_ai::{
+use imageops_kit::{
     ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingExt, Position,
     PremultiplyAlphaAndDropExt,
 };

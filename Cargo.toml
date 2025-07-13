@@ -1,14 +1,14 @@
 [package]
-name = "imageops-ai"
+name = "imageops-kit"
 version = "0.1.0"
 edition = "2021"
 authors = ["nusu-github"]
-description = "AI-powered image operations library for advanced image processing tasks"
+description = "A Rust library for image processing operations and utilities"
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/nusu-github/imageops-ai"
-documentation = "https://docs.rs/imageops-ai"
-repository = "https://github.com/nusu-github/imageops-ai"
-keywords = ["image", "ai", "processing", "alpha", "foreground"]
+homepage = "https://github.com/nusu-github/imageops-kit"
+documentation = "https://docs.rs/imageops-kit"
+repository = "https://github.com/nusu-github/imageops-kit"
+keywords = ["image", "processing", "alpha", "utility", "kit"]
 categories = ["multimedia::images", "computer-vision"]
 
 [features]

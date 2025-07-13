@@ -30,7 +30,7 @@ pub trait ClipMinimumBorderExt<S> {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::ClipMinimumBorderExt;
+    /// use imageops_kit::ClipMinimumBorderExt;
     /// use imageproc::definitions::Image;
     /// use image::Rgb;
     ///
@@ -255,7 +255,7 @@ mod tests {
 
         if let Err(err) = result {
             // Debug: check what error we're getting
-            eprintln!("Error: {:?}", err);
+            eprintln!("Error: {err:?}");
             // If no content found, that may be due to algorithm behavior
             assert!(matches!(err, ClipBorderError::NoContentFound));
             return;
@@ -330,7 +330,7 @@ mod tests {
 
         if let Err(err) = result {
             // Debug: check what error we're getting
-            eprintln!("Error: {:?}", err);
+            eprintln!("Error: {err:?}");
             // With very low threshold and clear difference, this should not fail
             // But if it does, that's okay - algorithm behavior may be different
             assert!(matches!(err, ClipBorderError::NoContentFound));
@@ -480,7 +480,7 @@ mod tests {
 
         if let Err(err) = result {
             // Alpha handling might not work as expected - that's okay
-            eprintln!("Alpha transparency test failed: {:?}", err);
+            eprintln!("Alpha transparency test failed: {err:?}");
             assert!(matches!(err, ClipBorderError::NoContentFound));
             return;
         }

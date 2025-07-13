@@ -35,7 +35,7 @@ pub trait ApplyAlphaMaskExt {
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ApplyAlphaMaskExt};
+    /// use imageops_kit::{Image, ApplyAlphaMaskExt};
     /// use image::{ImageBuffer, Rgb, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -82,7 +82,7 @@ pub trait ModifyAlphaExt {
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ModifyAlphaExt};
+    /// use imageops_kit::{Image, ModifyAlphaExt};
     /// use image::{ImageBuffer, Rgba, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -119,7 +119,7 @@ pub trait ModifyAlphaExt {
     /// # Examples
     ///
     /// ```no_run
-    /// use imageops_ai::{Image, ModifyAlphaExt};
+    /// use imageops_kit::{Image, ModifyAlphaExt};
     /// use image::{ImageBuffer, Rgba, Luma};
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {

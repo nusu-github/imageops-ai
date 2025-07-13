@@ -267,7 +267,7 @@ impl_larger_type!(i32, u64);
 /// # Examples
 /// ```no_run
 /// use image::{ImageBuffer, Rgb};
-/// use imageops_ai::unify_rgb_images;
+/// use imageops_kit::unify_rgb_images;
 ///
 /// let image1: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(2, 2, vec![
 ///     10, 20, 30, 40, 50, 60,
@@ -316,7 +316,7 @@ where
 /// # Examples
 /// ```no_run
 /// use image::{ImageBuffer, Luma};
-/// use imageops_ai::unify_gray_images;
+/// use imageops_kit::unify_gray_images;
 ///
 /// let image1: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::from_raw(2, 2, vec![
 ///     10, 20, 30, 40

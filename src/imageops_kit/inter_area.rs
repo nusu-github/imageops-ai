@@ -603,9 +603,7 @@ mod tests {
                 .sum();
             assert!(
                 (sum - 1.0).abs() < 1e-5,
-                "Destination {} weight sum: {}",
-                dst_idx,
-                sum
+                "Destination {dst_idx} weight sum: {sum}"
             );
         }
     }

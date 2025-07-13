@@ -5,7 +5,7 @@
 
 use criterion::*;
 use image::{Luma, Rgb, Rgba};
-use imageops_ai::{
+use imageops_kit::{
     ApplyAlphaMaskExt, ForegroundEstimationExt, Image, InterAreaResizeExt, PaddingExt, Position,
     PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt,
 };

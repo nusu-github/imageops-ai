@@ -81,7 +81,7 @@
 //! ### Basic Usage
 //!
 //! ```rust
-//! use imageops_ai::{estimate_foreground_colors, ForegroundEstimationExt};
+//! use imageops_kit::{estimate_foreground_colors, ForegroundEstimationExt};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Luma};
 //!
@@ -102,7 +102,7 @@
 //! ### Blur-Fusion x2 (2 iterations)
 //!
 //! ```rust
-//! # use imageops_ai::estimate_foreground_colors;
+//! # use imageops_kit::estimate_foreground_colors;
 //! # use imageproc::definitions::Image;
 //! # use image::{Rgb, Luma};
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -238,7 +238,7 @@ where
 ///
 /// # Examples
 /// ```no_run
-/// use imageops_ai::estimate_foreground_colors;
+/// use imageops_kit::estimate_foreground_colors;
 /// use imageproc::definitions::Image;
 /// use image::{Rgb, Luma};
 ///

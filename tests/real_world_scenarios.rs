@@ -4,7 +4,7 @@
 //! testing complete workflows from start to finish.
 
 use image::{Luma, Rgb};
-use imageops_ai::*;
+use imageops_kit::*;
 
 /// Profile photo processing scenario
 /// Typical workflow: foreground estimation → background removal → padding for profile picture

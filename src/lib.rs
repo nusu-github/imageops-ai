@@ -1,6 +1,6 @@
-//! # imageops-ai
+//! # imageops-kit
 //!
-//! A Rust library for AI-powered image processing operations.
+//! A Rust library for image processing operations and utilities.
 //!
 //! This crate provides specialized operations for advanced image processing tasks:
 //!
@@ -15,7 +15,7 @@
 //! ## Example Usage
 //!
 //! ```no_run
-//! use imageops_ai::{PremultiplyAlphaAndDropExt, ApplyAlphaMaskExt, PaddingExt, Position, OneSidedBoxFilterExt, InterAreaResizeExt};
+//! use imageops_kit::{PremultiplyAlphaAndDropExt, ApplyAlphaMaskExt, PaddingExt, Position, OneSidedBoxFilterExt, InterAreaResizeExt};
 //! use imageproc::definitions::Image;
 //! use image::{Rgb, Rgba, Luma};
 //!
@@ -53,7 +53,7 @@
 //! - `serde`: Enables serialization support (optional)
 
 mod error;
-mod imageops_ai;
+mod imageops_kit;
 mod utils;
 
 #[cfg(test)]
@@ -63,14 +63,14 @@ pub use error::{
     AlphaMaskError, BoxFilterError, ClipBorderError, ColorConversionError, GuidedFilterError,
     InterAreaError, NLMeansError, OSBFilterError, PaddingError,
 };
-pub use imageops_ai::alpha_premultiply::{PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt};
-pub use imageops_ai::apply_alpha_mask::{ApplyAlphaMaskExt, ModifyAlphaExt};
-pub use imageops_ai::blur_fusion::{estimate_foreground_colors, ForegroundEstimationExt};
-pub use imageops_ai::clip_minimum_border::ClipMinimumBorderExt;
-pub use imageops_ai::inter_area::{InterAreaResize, InterAreaResizeExt, InterpolationWeight};
-pub use imageops_ai::nlmeans::NLMeansExt;
-pub use imageops_ai::osbf::{OneSidedBoxFilter, OneSidedBoxFilterApplicator, OneSidedBoxFilterExt};
-pub use imageops_ai::padding::{add_padding, calculate_position, PaddingExt, Position};
+pub use imageops_kit::alpha_premultiply::{PremultiplyAlphaAndDropExt, PremultiplyAlphaAndKeepExt};
+pub use imageops_kit::apply_alpha_mask::{ApplyAlphaMaskExt, ModifyAlphaExt};
+pub use imageops_kit::blur_fusion::{estimate_foreground_colors, ForegroundEstimationExt};
+pub use imageops_kit::clip_minimum_border::ClipMinimumBorderExt;
+pub use imageops_kit::inter_area::{InterAreaResize, InterAreaResizeExt, InterpolationWeight};
+pub use imageops_kit::nlmeans::NLMeansExt;
+pub use imageops_kit::osbf::{OneSidedBoxFilter, OneSidedBoxFilterApplicator, OneSidedBoxFilterExt};
+pub use imageops_kit::padding::{add_padding, calculate_position, PaddingExt, Position};
 pub use utils::{unify_gray_images, unify_rgb_images, LargerType, NormalizedFrom};
 
 // Re-export imageproc::definitions::Image for convenience

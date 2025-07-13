@@ -4,7 +4,7 @@
 //! simulating real-world usage scenarios.
 
 use image::{Luma, Rgb, Rgba};
-use imageops_ai::{
+use imageops_kit::{
     ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingExt, Position,
     PremultiplyAlphaAndDropExt,
 };

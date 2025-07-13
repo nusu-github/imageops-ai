@@ -32,7 +32,7 @@ use crate::error::NLMeansError;
 /// # Examples
 ///
 /// ```rust
-/// use imageops_ai::NLMeansExt;
+/// use imageops_kit::NLMeansExt;
 /// use image::{ImageBuffer, Rgb};
 ///
 /// // Create a sample RGB image
@@ -929,7 +929,7 @@ mod tests {
         let result = image.nl_means(10.0, 3, 7);
         match &result {
             Ok(_) => {}
-            Err(e) => panic!("NL-Means failed: {:?}", e),
+            Err(e) => panic!("NL-Means failed: {e:?}"),
         }
         assert!(result.is_ok());
 

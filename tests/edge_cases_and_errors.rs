@@ -4,7 +4,7 @@
 //! to ensure robust error handling and correct behavior at extremes.
 
 use image::{Luma, Rgb, Rgba};
-use imageops_ai::{
+use imageops_kit::{
     AlphaMaskError, ApplyAlphaMaskExt, ForegroundEstimationExt, Image, PaddingError, PaddingExt,
     Position, PremultiplyAlphaAndDropExt,
 };

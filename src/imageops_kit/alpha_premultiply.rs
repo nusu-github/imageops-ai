@@ -43,7 +43,7 @@ pub trait PremultiplyAlphaAndDropExt {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::PremultiplyAlphaAndDropExt;
+    /// use imageops_kit::PremultiplyAlphaAndDropExt;
     /// use imageproc::definitions::Image;
     /// use image::Rgba;
     ///
@@ -72,7 +72,7 @@ pub trait PremultiplyAlphaAndKeepExt {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::PremultiplyAlphaAndKeepExt;
+    /// use imageops_kit::PremultiplyAlphaAndKeepExt;
     /// use imageproc::definitions::Image;
     /// use image::Rgba;
     ///
@@ -94,7 +94,7 @@ pub trait PremultiplyAlphaAndKeepExt {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::PremultiplyAlphaAndKeepExt;
+    /// use imageops_kit::PremultiplyAlphaAndKeepExt;
     /// use imageproc::definitions::Image;
     /// use image::Rgba;
     ///

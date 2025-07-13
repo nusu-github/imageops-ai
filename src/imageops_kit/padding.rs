@@ -98,7 +98,7 @@ pub fn calculate_position(
 /// ```
 /// use image::{Rgb, RgbImage};
 /// use imageproc::definitions::Image;
-/// use imageops_ai::{add_padding, Position};
+/// use imageops_kit::{add_padding, Position};
 ///
 /// let image: RgbImage = RgbImage::new(10, 10);
 /// let padded = add_padding(&image, (20, 20), Position::Center, Rgb([255, 255, 255])).unwrap();
@@ -242,7 +242,7 @@ pub trait PaddingExt<P: Pixel> {
     ///
     /// # Examples
     /// ```no_run
-    /// use imageops_ai::{PaddingExt, Position, Image};
+    /// use imageops_kit::{PaddingExt, Position, Image};
     /// use image::Rgb;
     ///
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {

@@ -40,7 +40,7 @@ where
 /// `Ok(())` if the dimensions are valid, otherwise an error
 pub fn validate_non_empty_image(width: u32, height: u32, context: &str) -> Result<(), String> {
     if width == 0 || height == 0 {
-        Err(format!("{}: Image dimensions must be non-zero", context))
+        Err(format!("{context}: Image dimensions must be non-zero"))
     } else {
         Ok(())
     }
@@ -68,8 +68,7 @@ pub fn validate_matching_dimensions(
 ) -> Result<(), String> {
     if width1 != width2 || height1 != height2 {
         Err(format!(
-            "_action_expected{}: Image dimensions must match. Got {}x{} and {}x{}",
-            context, width1, height1, width2, height2
+            "_action_expected{context}: Image dimensions must match. Got {width1}x{height1} and {width2}x{height2}"
         ))
     } else {
         Ok(())
