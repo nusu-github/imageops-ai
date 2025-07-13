@@ -495,4 +495,223 @@ mod tests {
             assert_eq!(result.unwrap(), expected);
         }
     }
+
+    #[test]
+    fn calculate_position_top_returns_center_x_zero_y() {
+        let pos = calculate_position((4, 4), (10, 8), Position::Top);
+        assert_eq!(pos, Ok((3, 0))); // (10-4)/2, 0
+    }
+
+    #[test]
+    fn calculate_position_bottom_returns_center_x_max_y() {
+        let pos = calculate_position((4, 4), (10, 8), Position::Bottom);
+        assert_eq!(pos, Ok((3, 4))); // (10-4)/2, 8-4
+    }
+
+    #[test]
+    fn calculate_position_left_returns_zero_x_center_y() {
+        let pos = calculate_position((4, 4), (8, 10), Position::Left);
+        assert_eq!(pos, Ok((0, 3))); // 0, (10-4)/2
+    }
+
+    #[test]
+    fn calculate_position_right_returns_max_x_center_y() {
+        let pos = calculate_position((4, 4), (8, 10), Position::Right);
+        assert_eq!(pos, Ok((4, 3))); // 8-4, (10-4)/2
+    }
+
+    #[test]
+    fn add_padding_with_same_size_preserves_original_image() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]);
+
+        let result = add_padding(&image, (2, 2), Position::Center, fill_color);
+        assert!(result.is_ok());
+
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (2, 2));
+    }
+
+    #[test]
+    fn add_padding_with_extreme_size_difference_creates_correct_dimensions() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]);
+
+        let result = add_padding(&image, (100, 100), Position::Center, fill_color);
+        assert!(result.is_ok());
+
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (100, 100));
+    }
+
+    #[test]
+    fn add_padding_with_rgba_pixel_creates_padded_image() {
+        use image::Rgba;
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Rgba([255, 0, 0, 255]));
+        image.put_pixel(1, 1, Rgba([0, 255, 0, 128]));
+
+        let fill_color = Rgba([0, 0, 255, 255]);
+        let result = add_padding(&image, (4, 4), Position::Center, fill_color);
+
+        assert!(result.is_ok());
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (4, 4));
+    }
+
+    #[test]
+    fn add_padding_with_luma_pixel_creates_padded_image() {
+        use image::Luma;
+        let mut image: Image<Luma<u8>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Luma([100]));
+        image.put_pixel(1, 1, Luma([200]));
+
+        let fill_color = Luma([50]);
+        let result = add_padding(&image, (4, 4), Position::Center, fill_color);
+
+        assert!(result.is_ok());
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (4, 4));
+    }
+
+    #[test]
+    fn copy_image_impl_with_zero_offset_preserves_pixel_values() {
+        let src = create_test_rgb_image(); // 2x2 image
+        let mut dst: Image<Rgb<u8>> = Image::new(4, 4);
+
+        // Store original pixel for comparison
+        let orig_pixel = *src.get_pixel(0, 0);
+
+        copy_image_impl(&src, &mut dst, 0, 0, 2, 2);
+
+        // Verify pixel was copied correctly
+        assert_eq!(*dst.get_pixel(0, 0), orig_pixel);
+    }
+
+    #[test]
+    fn copy_image_impl_with_offset_places_pixels_correctly() {
+        let src = create_test_rgb_image(); // 2x2 image
+        let mut dst: Image<Rgb<u8>> = Image::new(4, 4);
+
+        let orig_pixel = *src.get_pixel(0, 0);
+
+        copy_image_impl(&src, &mut dst, 1, 1, 2, 2);
+
+        // Verify pixel was placed at correct offset position
+        assert_eq!(*dst.get_pixel(1, 1), orig_pixel);
+    }
+
+    #[test]
+    fn create_buffer_impl_with_rgb_creates_correct_dimensions() {
+        let fill_color = Rgb([100, 150, 200]);
+        let buffer = create_buffer_impl(10, 5, fill_color);
+
+        assert_eq!(buffer.dimensions(), (10, 5));
+    }
+
+    #[test]
+    fn create_buffer_impl_fills_with_specified_color() {
+        let fill_color = Rgb([100, 150, 200]);
+        let buffer = create_buffer_impl(3, 3, fill_color);
+
+        // Check that all pixels have the fill color
+        assert_eq!(*buffer.get_pixel(0, 0), fill_color);
+        assert_eq!(*buffer.get_pixel(2, 2), fill_color);
+    }
+
+    #[test]
+    fn to_square_with_height_greater_than_width_creates_square() {
+        // Test rectangular image (height > width)
+        let mut image: Image<Rgb<u8>> = Image::new(4, 6);
+        for y in 0..6 {
+            for x in 0..4 {
+                image.put_pixel(x, y, Rgb([100, 150, 200]));
+            }
+        }
+
+        let result = image.to_square(Rgb([255, 255, 255]));
+        assert!(result.is_ok());
+
+        let (padded, pos) = result.unwrap();
+        assert_eq!(padded.dimensions(), (6, 6)); // Should be square
+        assert_eq!(pos, (1, 0)); // Centered horizontally
+    }
+
+    #[test]
+    fn add_padding_edge_case_boundary_conditions_safe() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]);
+
+        // Test edge case: image placed at exact boundary
+        let result = add_padding(&image, (3, 3), Position::BottomRight, fill_color);
+        assert!(result.is_ok());
+
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (3, 3));
+
+        // Verify original content is preserved at boundary position
+        // BottomRight position places 2x2 image at (1, 1), so (0, 0) of original becomes (1, 1) of padded
+        let orig_pixel = Rgb([200, 150, 100]); // From create_test_rgb_image (0, 0)
+        assert_eq!(*padded.get_pixel(1, 1), orig_pixel);
+    }
+
+    #[test]
+    fn bulk_copy_fallback_preserves_pixel_accuracy() {
+        let src = create_test_rgb_image(); // 2x2 image
+        let mut dst: Image<Rgb<u8>> = Image::new(100, 100); // Large dest to trigger bulk copy logic
+
+        let orig_pixel = *src.get_pixel(1, 0);
+
+        copy_image_impl(&src, &mut dst, 0, 0, 2, 2);
+
+        // Verify pixel accuracy in bulk copy scenario
+        assert_eq!(*dst.get_pixel(1, 0), orig_pixel);
+    }
+
+    #[test]
+    fn calculate_position_center_with_odd_sized_padding_handles_non_divisible_correctly() {
+        // Test case where (target_size - original_size) is odd, resulting in non-equal padding
+        let pos = calculate_position((3, 3), (8, 8), Position::Center);
+        assert_eq!(pos, Ok((2, 2))); // (8-3)/2 = 2.5 → 2 (truncated)
+
+        // This means left/top padding = 2, right/bottom padding = 3
+        // Verify asymmetric padding behavior
+        let pos = calculate_position((4, 4), (9, 9), Position::Center);
+        assert_eq!(pos, Ok((2, 2))); // (9-4)/2 = 2.5 → 2 (truncated)
+    }
+
+    #[test]
+    fn add_padding_with_odd_sized_target_creates_asymmetric_padding() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]);
+
+        // Test 2x2 → 5x5 padding (results in asymmetric padding)
+        let result = add_padding(&image, (5, 5), Position::Center, fill_color);
+        assert!(result.is_ok());
+
+        let padded = result.unwrap();
+        assert_eq!(padded.dimensions(), (5, 5));
+
+        // Original content should be at position (1, 1) - (2, 2)
+        // (5-2)/2 = 1.5 → 1 (truncated), so left/top padding = 1, right/bottom = 2
+        let orig_pixel = *image.get_pixel(0, 0); // Original (0,0)
+        assert_eq!(*padded.get_pixel(1, 1), orig_pixel); // Should be at (1,1) in padded
+
+        // Verify fill color in padding areas
+        assert_eq!(*padded.get_pixel(0, 0), fill_color); // Top-left padding
+        assert_eq!(*padded.get_pixel(4, 4), fill_color); // Bottom-right padding
+    }
+
+    #[test]
+    fn add_padding_ext_with_odd_sizes_returns_correct_position() {
+        let image = create_test_rgb_image(); // 2x2 image
+        let fill_color = Rgb([255, 255, 255]);
+
+        let result = image.add_padding((7, 7), Position::Center, fill_color);
+        assert!(result.is_ok());
+
+        let (padded, pos) = result.unwrap();
+        assert_eq!(padded.dimensions(), (7, 7));
+        assert_eq!(pos, (2, 2)); // (7-2)/2 = 2.5 → 2 (truncated)
+    }
 }

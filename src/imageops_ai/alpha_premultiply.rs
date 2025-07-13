@@ -579,4 +579,239 @@ mod tests {
         assert_eq!(image_copy.get_pixel(0, 0).0, [200, 150, 100, 255]); // Full opacity unchanged
         assert_eq!(image_copy.get_pixel(1, 0).0, [100, 75, 50, 127]); // Premultiplied, alpha preserved
     }
+
+    // Tests for u16 data type premultiplication
+    #[test]
+    fn premultiply_alpha_and_drop_for_lumaa_u16_drops_alpha_channel() {
+        let mut image: Image<LumaA<u16>> = Image::new(2, 2);
+        image.put_pixel(0, 0, LumaA([32768, 65535])); // Full opacity, half luminance
+        image.put_pixel(1, 0, LumaA([65535, 32768])); // Half opacity, full luminance
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        assert_eq!(result.get_pixel(0, 0)[0], 32768); // 32768 * 1.0
+        assert_eq!(result.get_pixel(1, 0)[0], 32768); // 65535 * 0.5 ≈ 32768
+    }
+
+    #[test]
+    fn premultiply_alpha_and_drop_for_rgba_u16_drops_alpha_channel() {
+        let mut image: Image<Rgba<u16>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Rgba([32768, 16384, 8192, 65535])); // Full opacity
+        image.put_pixel(1, 0, Rgba([65535, 32768, 16384, 32768])); // Half opacity
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel_00 = result.get_pixel(0, 0);
+        assert_eq!(pixel_00[0], 32768);
+        assert_eq!(pixel_00[1], 16384);
+        assert_eq!(pixel_00[2], 8192);
+
+        let pixel_10 = result.get_pixel(1, 0);
+        assert_eq!(pixel_10[0], 32768); // 65535 * 0.5 ≈ 32768
+        assert_eq!(pixel_10[1], 16384); // 32768 * 0.5 ≈ 16384
+        assert_eq!(pixel_10[2], 8192); // 16384 * 0.5 ≈ 8192
+    }
+
+    // Tests for u32 data type premultiplication
+    #[test]
+    fn premultiply_alpha_and_drop_for_rgba_u32_drops_alpha_channel() {
+        let mut image: Image<Rgba<u32>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Rgba([2147483648, 1073741824, 536870912, u32::MAX])); // Full opacity
+        image.put_pixel(1, 0, Rgba([u32::MAX, 2147483648, 1073741824, 2147483648])); // Half opacity
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel_00 = result.get_pixel(0, 0);
+        assert_eq!(pixel_00[0], 2147483648);
+        assert_eq!(pixel_00[1], 1073741824);
+        assert_eq!(pixel_00[2], 536870912);
+
+        let pixel_10 = result.get_pixel(1, 0);
+        assert_eq!(pixel_10[0], 2147483648); // u32::MAX * 0.5 ≈ 2147483648
+        assert_eq!(pixel_10[1], 1073741824); // 2147483648 * 0.5 ≈ 1073741824
+        assert_eq!(pixel_10[2], 536870912); // 1073741824 * 0.5 ≈ 536870912
+    }
+
+    // Tests for f32 data type premultiplication
+    #[test]
+    fn premultiply_alpha_and_drop_for_lumaa_f32_drops_alpha_channel() {
+        let mut image: Image<LumaA<f32>> = Image::new(2, 2);
+        image.put_pixel(0, 0, LumaA([0.8, 1.0])); // Full opacity
+        image.put_pixel(1, 0, LumaA([0.6, 0.5])); // Half opacity
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        assert!((result.get_pixel(0, 0)[0] - 0.8).abs() < f32::EPSILON);
+        assert!((result.get_pixel(1, 0)[0] - 0.3).abs() < f32::EPSILON); // 0.6 * 0.5
+    }
+
+    #[test]
+    fn premultiply_alpha_and_drop_for_rgba_f32_drops_alpha_channel() {
+        let mut image: Image<Rgba<f32>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Rgba([0.8, 0.6, 0.4, 1.0])); // Full opacity
+        image.put_pixel(1, 0, Rgba([0.8, 0.6, 0.4, 0.5])); // Half opacity
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel_00 = result.get_pixel(0, 0);
+        assert!((pixel_00[0] - 0.8).abs() < f32::EPSILON);
+        assert!((pixel_00[1] - 0.6).abs() < f32::EPSILON);
+        assert!((pixel_00[2] - 0.4).abs() < f32::EPSILON);
+
+        let pixel_10 = result.get_pixel(1, 0);
+        assert!((pixel_10[0] - 0.4).abs() < f32::EPSILON); // 0.8 * 0.5
+        assert!((pixel_10[1] - 0.3).abs() < f32::EPSILON); // 0.6 * 0.5
+        assert!((pixel_10[2] - 0.2).abs() < f32::EPSILON); // 0.4 * 0.5
+    }
+
+    // Boundary value tests
+    #[test]
+    fn premultiply_alpha_and_drop_with_zero_alpha_returns_black() {
+        let mut image: Image<Rgba<u8>> = Image::new(1, 1);
+        image.put_pixel(0, 0, Rgba([255, 128, 64, 0])); // Zero alpha
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel = result.get_pixel(0, 0);
+        assert_eq!(pixel[0], 0);
+        assert_eq!(pixel[1], 0);
+        assert_eq!(pixel[2], 0);
+    }
+
+    #[test]
+    fn premultiply_alpha_and_drop_with_max_values_preserves_color() {
+        let mut image: Image<Rgba<u8>> = Image::new(1, 1);
+        image.put_pixel(0, 0, Rgba([255, 255, 255, 255])); // Max values
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel = result.get_pixel(0, 0);
+        assert_eq!(pixel[0], 255);
+        assert_eq!(pixel[1], 255);
+        assert_eq!(pixel[2], 255);
+    }
+
+    #[test]
+    fn premultiply_alpha_and_drop_with_zero_alpha_f32_returns_zero() {
+        let mut image: Image<Rgba<f32>> = Image::new(1, 1);
+        image.put_pixel(0, 0, Rgba([1.0, 0.8, 0.6, 0.0])); // Zero alpha
+
+        let result = image.premultiply_alpha_and_drop().unwrap();
+
+        let pixel = result.get_pixel(0, 0);
+        assert!((pixel[0] - 0.0).abs() < f32::EPSILON);
+        assert!((pixel[1] - 0.0).abs() < f32::EPSILON);
+        assert!((pixel[2] - 0.0).abs() < f32::EPSILON);
+    }
+
+    // Tests for LUT accuracy (u8 optimization)
+    #[test]
+    fn premultiply_u8_with_known_values_matches_expected() {
+        assert_eq!(premultiply_u8(255, 255), 255); // Max * Max = Max
+        assert_eq!(premultiply_u8(255, 0), 0); // Max * 0 = 0
+        assert_eq!(premultiply_u8(0, 255), 0); // 0 * Max = 0
+        assert_eq!(premultiply_u8(255, 127), 127); // Max * Half ≈ Half
+        assert_eq!(premultiply_u8(128, 255), 128); // Half * Max = Half
+    }
+
+    #[test]
+    fn premultiply_rgb_u8_with_known_values_matches_expected() {
+        let result = premultiply_rgb_u8([255, 128, 64], 127);
+        assert_eq!(result[0], 127); // 255 * 127/255 ≈ 127
+        assert_eq!(result[1], 64); // 128 * 127/255 ≈ 64
+        assert_eq!(result[2], 32); // 64 * 127/255 ≈ 32
+    }
+
+    // Tests for integer arithmetic accuracy (u16/u32)
+    #[test]
+    fn premultiply_u16_with_known_values_matches_expected() {
+        assert_eq!(premultiply_u16(65535, 65535), 65535); // Max * Max = Max
+        assert_eq!(premultiply_u16(65535, 0), 0); // Max * 0 = 0
+        assert_eq!(premultiply_u16(0, 65535), 0); // 0 * Max = 0
+        assert_eq!(premultiply_u16(65535, 32768), 32768); // Max * Half ≈ Half
+    }
+
+    #[test]
+    fn premultiply_u32_with_known_values_matches_expected() {
+        assert_eq!(premultiply_u32(u32::MAX, u32::MAX), u32::MAX); // Max * Max = Max
+        assert_eq!(premultiply_u32(u32::MAX, 0), 0); // Max * 0 = 0
+        assert_eq!(premultiply_u32(0, u32::MAX), 0); // 0 * Max = 0
+
+        let half_max = u32::MAX / 2;
+        let result = premultiply_u32(u32::MAX, half_max);
+        assert!((result as i64 - half_max as i64).abs() <= 1); // Allow for rounding
+    }
+
+    // Missing in-place operation tests
+    #[test]
+    fn premultiply_alpha_and_keep_mut_for_lumaa_u8_preserves_alpha() {
+        let mut image: Image<LumaA<u8>> = Image::new(2, 2);
+        image.put_pixel(0, 0, LumaA([200, 255])); // Full opacity
+        image.put_pixel(1, 0, LumaA([200, 127])); // Half opacity
+
+        image.premultiply_alpha_and_keep_mut().unwrap();
+
+        assert_eq!(image.get_pixel(0, 0).0, [200, 255]); // 200 * 1.0, alpha preserved
+        assert_eq!(image.get_pixel(1, 0).0, [100, 127]); // 200 * 127/255, alpha preserved
+    }
+
+    #[test]
+    fn premultiply_alpha_and_keep_for_rgba_f32_preserves_alpha() {
+        let mut image: Image<Rgba<f32>> = Image::new(2, 2);
+        image.put_pixel(0, 0, Rgba([0.8, 0.6, 0.4, 1.0])); // Full opacity
+        image.put_pixel(1, 0, Rgba([0.8, 0.6, 0.4, 0.5])); // Half opacity
+
+        let result = image.premultiply_alpha_and_keep().unwrap();
+
+        let pixel_00 = result.get_pixel(0, 0);
+        assert!((pixel_00[0] - 0.8).abs() < f32::EPSILON);
+        assert!((pixel_00[1] - 0.6).abs() < f32::EPSILON);
+        assert!((pixel_00[2] - 0.4).abs() < f32::EPSILON);
+        assert!((pixel_00[3] - 1.0).abs() < f32::EPSILON); // Alpha preserved
+
+        let pixel_10 = result.get_pixel(1, 0);
+        assert!((pixel_10[0] - 0.4).abs() < f32::EPSILON); // 0.8 * 0.5
+        assert!((pixel_10[1] - 0.3).abs() < f32::EPSILON); // 0.6 * 0.5
+        assert!((pixel_10[2] - 0.2).abs() < f32::EPSILON); // 0.4 * 0.5
+        assert!((pixel_10[3] - 0.5).abs() < f32::EPSILON); // Alpha preserved
+    }
+
+    #[test]
+    fn premultiply_alpha_and_keep_mut_for_lumaa_f32_preserves_alpha() {
+        let mut image: Image<LumaA<f32>> = Image::new(2, 2);
+        image.put_pixel(0, 0, LumaA([0.8, 1.0])); // Full opacity
+        image.put_pixel(1, 0, LumaA([0.6, 0.5])); // Half opacity
+
+        image.premultiply_alpha_and_keep_mut().unwrap();
+
+        let pixel_00 = image.get_pixel(0, 0);
+        assert!((pixel_00[0] - 0.8).abs() < f32::EPSILON);
+        assert!((pixel_00[1] - 1.0).abs() < f32::EPSILON); // Alpha preserved
+
+        let pixel_10 = image.get_pixel(1, 0);
+        assert!((pixel_10[0] - 0.3).abs() < f32::EPSILON); // 0.6 * 0.5
+        assert!((pixel_10[1] - 0.5).abs() < f32::EPSILON); // Alpha preserved
+    }
+
+    // Error case tests
+    #[test]
+    fn premultiply_alpha_and_drop_with_empty_image_returns_error() {
+        let empty_image: Image<Rgba<u8>> = Image::new(0, 0);
+        let result = empty_image.premultiply_alpha_and_drop();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn premultiply_alpha_and_keep_with_empty_image_returns_error() {
+        let empty_image: Image<LumaA<u8>> = Image::new(0, 0);
+        let result = empty_image.premultiply_alpha_and_keep();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn premultiply_alpha_and_keep_mut_with_empty_image_returns_error() {
+        let mut empty_image: Image<Rgba<f32>> = Image::new(0, 0);
+        let result = empty_image.premultiply_alpha_and_keep_mut();
+        assert!(result.is_err());
+    }
 }

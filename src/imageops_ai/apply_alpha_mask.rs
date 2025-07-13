@@ -355,4 +355,132 @@ mod tests {
 
         assert_eq!(image.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
     }
+
+    #[test]
+    fn replace_alpha_mut_blue_pixel_preserves_rgb_and_replaces_alpha_in_place() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(0, 1, Rgba([0, 0, 255, 50]));
+        mask.put_pixel(0, 1, Luma([64]));
+
+        image.replace_alpha_mut(&mask).unwrap();
+
+        assert_eq!(image.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
+    }
+
+    #[test]
+    fn replace_alpha_mut_white_pixel_preserves_rgb_and_replaces_alpha_in_place() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(1, 1, Rgba([255, 255, 255, 150]));
+        mask.put_pixel(1, 1, Luma([0]));
+
+        image.replace_alpha_mut(&mask).unwrap();
+
+        assert_eq!(image.get_pixel(1, 1), &Rgba([255, 255, 255, 0]));
+    }
+
+    #[test]
+    fn apply_alpha_mask_dimension_mismatch_returns_error() {
+        let image: Image<Rgb<u8>> = Image::new(10, 10);
+        let mask: Image<Luma<u8>> = Image::new(5, 5);
+
+        let result = image.apply_alpha_mask(&mask);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn replace_alpha_dimension_mismatch_returns_error() {
+        let image: Image<Rgba<u8>> = Image::new(10, 10);
+        let mask: Image<Luma<u8>> = Image::new(5, 5);
+
+        let result = image.replace_alpha(&mask);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn replace_alpha_mut_dimension_mismatch_returns_error() {
+        let mut image: Image<Rgba<u8>> = Image::new(10, 10);
+        let mask: Image<Luma<u8>> = Image::new(5, 5);
+
+        let result = image.replace_alpha_mut(&mask);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn apply_alpha_mask_multiple_pixels_applies_correctly() {
+        let mut image: Image<Rgb<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(0, 0, Rgb([255, 0, 0]));
+        image.put_pixel(1, 0, Rgb([0, 255, 0]));
+        image.put_pixel(0, 1, Rgb([0, 0, 255]));
+        image.put_pixel(1, 1, Rgb([255, 255, 255]));
+
+        mask.put_pixel(0, 0, Luma([255]));
+        mask.put_pixel(1, 0, Luma([128]));
+        mask.put_pixel(0, 1, Luma([64]));
+        mask.put_pixel(1, 1, Luma([0]));
+
+        let result = image.apply_alpha_mask(&mask).unwrap();
+
+        assert_eq!(result.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(result.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
+        assert_eq!(result.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
+        assert_eq!(result.get_pixel(1, 1), &Rgba([255, 255, 255, 0]));
+    }
+
+    #[test]
+    fn replace_alpha_mut_multiple_pixels_replaces_correctly() {
+        let mut image: Image<Rgba<u8>> = Image::new(2, 2);
+        let mut mask: Image<Luma<u8>> = Image::new(2, 2);
+
+        image.put_pixel(0, 0, Rgba([255, 0, 0, 100]));
+        image.put_pixel(1, 0, Rgba([0, 255, 0, 200]));
+        image.put_pixel(0, 1, Rgba([0, 0, 255, 50]));
+        image.put_pixel(1, 1, Rgba([255, 255, 255, 150]));
+
+        mask.put_pixel(0, 0, Luma([255]));
+        mask.put_pixel(1, 0, Luma([128]));
+        mask.put_pixel(0, 1, Luma([64]));
+        mask.put_pixel(1, 1, Luma([0]));
+
+        image.replace_alpha_mut(&mask).unwrap();
+
+        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(1, 0), &Rgba([0, 255, 0, 128]));
+        assert_eq!(image.get_pixel(0, 1), &Rgba([0, 0, 255, 64]));
+        assert_eq!(image.get_pixel(1, 1), &Rgba([255, 255, 255, 0]));
+    }
+
+    #[test]
+    fn apply_alpha_mask_single_pixel_works() {
+        let mut image: Image<Rgb<u8>> = Image::new(1, 1);
+        let mut mask: Image<Luma<u8>> = Image::new(1, 1);
+
+        image.put_pixel(0, 0, Rgb([128, 64, 192]));
+        mask.put_pixel(0, 0, Luma([200]));
+
+        let result = image.apply_alpha_mask(&mask).unwrap();
+
+        assert_eq!(result.get_pixel(0, 0), &Rgba([128, 64, 192, 200]));
+    }
+
+    #[test]
+    fn replace_alpha_mut_single_pixel_works() {
+        let mut image: Image<Rgba<u8>> = Image::new(1, 1);
+        let mut mask: Image<Luma<u8>> = Image::new(1, 1);
+
+        image.put_pixel(0, 0, Rgba([128, 64, 192, 100]));
+        mask.put_pixel(0, 0, Luma([200]));
+
+        image.replace_alpha_mut(&mask).unwrap();
+
+        assert_eq!(image.get_pixel(0, 0), &Rgba([128, 64, 192, 200]));
+    }
 }
